@@ -42,7 +42,7 @@ async function findAvailablePort(startPort) {
 // Create Express app
 const app = express();
 app.use(cors({
-    origin: ['https://altear.vercel.app', 'http://localhost:3000'],
+    origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com'],
     methods: ['GET', 'POST'],
     credentials: true
 }));
@@ -55,11 +55,12 @@ const server = http.createServer(app);
 // Socket.IO Configuration
 const io = socketIo(server, {
     cors: {
-        origin: ['https://altear.vercel.app', 'http://localhost:3000'],
+        origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com'],
         methods: ['GET', 'POST'],
         credentials: true
     },
-    transports: ['websocket', 'polling']
+    transports: ['websocket', 'polling'],
+    path: '/socket.io/'
 });
 
 // Debug middleware
