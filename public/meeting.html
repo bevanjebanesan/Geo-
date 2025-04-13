@@ -10,50 +10,47 @@
 </head>
 <body>
     <div class="meeting-container">
-        <!-- Top Ribbon -->
-        <div class="meeting-ribbon">
+        <div class="meeting-header">
+            <h1>Altear Video Meeting</h1>
             <div class="meeting-info">
-                <h2 id="meetingId">Meeting ID: <span id="meetingIdDisplay"></span></h2>
-                <p id="participantCount">Participants: <span id="participantCountDisplay">0</span></p>
+                <span id="meetingId">Meeting ID: </span>
+                <span id="participantCount">Participants: 0</span>
             </div>
         </div>
 
-        <!-- Main Content Area -->
-        <div class="main-content">
-            <!-- Video Grid -->
-            <div class="video-grid" id="videoGrid">
-                <div class="video-container self-video">
-                    <video id="localVideo" autoplay muted playsinline></video>
-                    <div class="video-label">You</div>
-                </div>
-            </div>
-
-            <!-- Sidebar with Participants -->
-            <div class="sidebar">
-                <!-- Participants List -->
-                <div class="participants-section">
-                    <div class="section-header">
-                        <h3>Participants</h3>
-                        <span id="participantCountSidebar">0</span>
-                    </div>
-                    <div class="participants-list" id="participantsList">
-                        <!-- Participants will be added here dynamically -->
-                    </div>
-                </div>
-            </div>
+        <div class="video-grid" id="videoGrid">
+            <!-- Video elements will be added here dynamically -->
         </div>
 
-        <!-- Bottom Controls -->
-        <div class="meeting-controls bottom-controls">
-            <button id="audioButton" class="control-button" title="Toggle Audio">
+        <div class="participants-list" id="participantsList">
+            <h3>Participants</h3>
+            <ul id="participantsListContent">
+                <!-- Participants will be added here dynamically -->
+            </ul>
+        </div>
+
+        <div class="meeting-controls">
+            <button id="toggleAudio" class="control-button">
                 <i class="fas fa-microphone"></i>
             </button>
-            <button id="videoButton" class="control-button" title="Toggle Video">
+            <button id="toggleVideo" class="control-button">
                 <i class="fas fa-video"></i>
+            </button>
+            <button id="leaveMeeting" class="control-button leave-button">
+                <i class="fas fa-phone-slash"></i>
             </button>
         </div>
     </div>
 
+    <script>
+        // Socket.IO client configuration
+        const socket = io('https://altear-video-meeting.onrender.com', {
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000
+        });
+    </script>
     <script src="meeting.js"></script>
 </body>
 </html> 
