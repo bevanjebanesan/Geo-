@@ -4,7 +4,6 @@ const socketIo = require('socket.io');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const path = require('path');
-const { execSync } = require('child_process');
 require('dotenv').config();
 
 // Handle uncaught exceptions
@@ -38,29 +37,6 @@ async function findAvailablePort(startPort) {
         port++;
     }
     return port;
-}
-
-// SSL Configuration
-let sslOptions;
-try {
-    sslOptions = {
-        key: fs.readFileSync('key.pem'),
-        cert: fs.readFileSync('cert.pem')
-    };
-    console.log('SSL certificates loaded successfully');
-} catch (error) {
-    console.log('Generating new SSL certificates...');
-    try {
-        execSync('openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes -subj "/CN=localhost" -addext "subjectAltName=DNS:localhost,IP:127.0.0.1,IP:192.168.0.100"');
-        sslOptions = {
-            key: fs.readFileSync('key.pem'),
-            cert: fs.readFileSync('cert.pem')
-        };
-        console.log('SSL certificates generated successfully');
-    } catch (error) {
-        console.error('Failed to generate SSL certificates:', error);
-        process.exit(1);
-    }
 }
 
 // Create Express app
