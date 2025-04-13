@@ -20,14 +20,33 @@ app.use(express.static(path.join(__dirname, 'public')));
 const server = http.createServer(app);
 
 // Create WebSocket server
-const wss = new WebSocket.Server({ server });
+const wss = new WebSocket.Server({ 
+    server,
+    path: '/',
+    clientTracking: true,
+    perMessageDeflate: {
+        zlibDeflateOptions: {
+            chunkSize: 1024,
+            memLevel: 7,
+            level: 3
+        },
+        zlibInflateOptions: {
+            chunkSize: 10 * 1024
+        },
+        clientNoContextTakeover: true,
+        serverNoContextTakeover: true,
+        serverMaxWindowBits: 10,
+        concurrencyLimit: 10,
+        threshold: 1024
+    }
+});
 
 // Store active connections
 const connections = new Map();
 
 // WebSocket connection handling
-wss.on('connection', (ws) => {
-    console.log('New client connected');
+wss.on('connection', (ws, req) => {
+    console.log('New client connected from:', req.headers.origin);
 
     ws.on('message', async (message) => {
         try {
@@ -91,6 +110,17 @@ wss.on('connection', (ws) => {
                 }
             }
         }
+    });
+
+    // Send ping every 30 seconds to keep connection alive
+    const pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.ping();
+        }
+    }, 30000);
+
+    ws.on('close', () => {
+        clearInterval(pingInterval);
     });
 });
 

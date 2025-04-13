@@ -1,7 +1,9 @@
 // Get the WebSocket URL based on environment
 const WS_URL = window.location.origin.includes('vercel') 
     ? 'wss://altear-video-meeting.onrender.com'
-    : 'ws://localhost:8181';
+    : window.location.protocol === 'https:'
+        ? 'wss://altear-video-meeting.onrender.com'
+        : 'ws://localhost:8181';
 
 // DOM Elements
 const joinContainer = document.getElementById('joinContainer');
@@ -65,31 +67,36 @@ let speechRecognition = null;
 
 // Initialize WebSocket connection
 function initWebSocket() {
+    console.log('Connecting to WebSocket server at:', WS_URL);
     ws = new WebSocket(WS_URL);
 
     ws.onopen = () => {
-        console.log('Connected to server');
+        console.log('Connected to server successfully');
     };
 
     ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        console.log('Received message:', data);
+        try {
+            const data = JSON.parse(event.data);
+            console.log('Received message:', data);
 
-        switch (data.type) {
-            case 'meetingCreated':
-                handleMeetingCreated(data.meetingId);
-                break;
-            case 'meetingJoined':
-                handleMeetingJoined();
-                break;
-            case 'offer':
-            case 'answer':
-            case 'ice-candidate':
-                handleWebRTCSignal(data);
-                break;
-            case 'error':
-                alert(data.message);
-                break;
+            switch (data.type) {
+                case 'meetingCreated':
+                    handleMeetingCreated(data.meetingId);
+                    break;
+                case 'meetingJoined':
+                    handleMeetingJoined();
+                    break;
+                case 'offer':
+                case 'answer':
+                case 'ice-candidate':
+                    handleWebRTCSignal(data);
+                    break;
+                case 'error':
+                    alert(data.message);
+                    break;
+            }
+        } catch (error) {
+            console.error('Error parsing message:', error);
         }
     };
 
