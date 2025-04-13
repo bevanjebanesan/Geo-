@@ -1,10 +1,7 @@
-// Use the global socket object initialized in the HTML
-const socket = window.socket;
-
-// Get the API URL based on environment
-const API_URL = window.location.origin.includes('vercel') 
-    ? 'https://altear-video-meeting.onrender.com'
-    : 'http://localhost:8181';
+// Get the WebSocket URL based on environment
+const WS_URL = window.location.origin.includes('vercel') 
+    ? 'wss://altear-video-meeting.onrender.com'
+    : 'ws://localhost:8181';
 
 // DOM Elements
 const joinContainer = document.getElementById('joinContainer');
@@ -55,38 +52,60 @@ const configuration = {
     rtcpMuxPolicy: 'require'
 };
 
-// State variables
-let localStream = null;
-let peerConnections = {};
+// WebSocket connection
+let ws = null;
 let currentMeetingId = null;
 let currentUsername = null;
+let localStream = null;
+let peerConnections = {};
 let isAudioEnabled = true;
 let isVideoEnabled = true;
 let isSpeechToTextActive = false;
 let speechRecognition = null;
 
-// Debug connection events
-socket.on('connect', () => {
-    console.log('Connected to server successfully');
-    console.log('Socket ID:', socket.id);
-});
+// Initialize WebSocket connection
+function initWebSocket() {
+    ws = new WebSocket(WS_URL);
 
-socket.on('connect_error', (error) => {
-    console.error('Connection error:', error);
-    alert('Failed to connect to the server. Please try again later.');
-});
+    ws.onopen = () => {
+        console.log('Connected to server');
+    };
 
-socket.on('disconnect', (reason) => {
-    console.log('Disconnected from server:', reason);
-    if (reason === 'io server disconnect') {
-        socket.connect();
-    }
-});
+    ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        console.log('Received message:', data);
 
-socket.on('error', (error) => {
-    console.error('Socket error:', error);
-    alert('An error occurred. Please try again.');
-});
+        switch (data.type) {
+            case 'meetingCreated':
+                handleMeetingCreated(data.meetingId);
+                break;
+            case 'meetingJoined':
+                handleMeetingJoined();
+                break;
+            case 'offer':
+            case 'answer':
+            case 'ice-candidate':
+                handleWebRTCSignal(data);
+                break;
+            case 'error':
+                alert(data.message);
+                break;
+        }
+    };
+
+    ws.onerror = (error) => {
+        console.error('WebSocket error:', error);
+        alert('Connection error. Please try again.');
+    };
+
+    ws.onclose = () => {
+        console.log('Disconnected from server');
+        setTimeout(initWebSocket, 1000); // Reconnect after 1 second
+    };
+}
+
+// Initialize WebSocket connection
+initWebSocket();
 
 // Initialize Speech Recognition
 function initializeSpeechToText() {
@@ -167,34 +186,13 @@ async function initializeMedia() {
 
 // Create a new meeting
 function createMeeting() {
-    console.log('Create meeting button clicked');
-    if (!socket.connected) {
-        console.error('Socket not connected');
-        alert('Not connected to server. Please try again.');
-        return;
-    }
-
     const username = prompt('Enter your name:');
-    if (!username) {
-        console.log('User cancelled name input');
-        return;
-    }
-
-    console.log('Creating meeting for user:', username);
-    currentUsername = username;
-    
-    try {
-        socket.emit('createMeeting', { username }, (response) => {
-            if (response && response.error) {
-                console.error('Error creating meeting:', response.error);
-                alert('Error creating meeting: ' + response.error);
-            } else {
-                console.log('Create meeting request sent');
-            }
-        });
-    } catch (error) {
-        console.error('Error emitting createMeeting:', error);
-        alert('Error creating meeting. Please try again.');
+    if (username) {
+        currentUsername = username;
+        ws.send(JSON.stringify({
+            type: 'createMeeting',
+            username
+        }));
     }
 }
 
@@ -205,13 +203,16 @@ function joinMeeting() {
     if (meetingId && username) {
         currentUsername = username;
         currentMeetingId = meetingId;
-        socket.emit('joinMeeting', { meetingId, username });
+        ws.send(JSON.stringify({
+            type: 'joinMeeting',
+            meetingId,
+            username
+        }));
     }
 }
 
-// Socket event handlers
-socket.on('meetingCreated', ({ meetingId }) => {
-    console.log('Meeting created with ID:', meetingId);
+// Handle meeting creation
+function handleMeetingCreated(meetingId) {
     currentMeetingId = meetingId;
     meetingIdDisplay.textContent = meetingId;
     usernameDisplay.textContent = currentUsername;
@@ -219,8 +220,18 @@ socket.on('meetingCreated', ({ meetingId }) => {
     meetingContainer.style.display = 'block';
     initializeMedia();
     updateParticipantsList([]);
-});
+}
 
+// Handle meeting join
+function handleMeetingJoined() {
+    meetingIdDisplay.textContent = currentMeetingId;
+    usernameDisplay.textContent = currentUsername;
+    joinContainer.style.display = 'none';
+    meetingContainer.style.display = 'block';
+    initializeMedia();
+}
+
+// Socket event handlers
 socket.on('participantJoined', ({ socketId, username, audioEnabled, videoEnabled }) => {
     createPeerConnection(socketId, username);
     updateParticipantsList();
