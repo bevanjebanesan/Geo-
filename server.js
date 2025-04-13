@@ -58,9 +58,12 @@ const io = socketIo(server, {
         origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com'],
         methods: ['GET', 'POST'],
         credentials: true
-    },
-    transports: ['websocket', 'polling'],
-    path: '/socket.io/'
+    }
+});
+
+// Serve Socket.IO client
+app.get('/socket.io/socket.io.js', (req, res) => {
+    res.sendFile(path.join(__dirname, 'node_modules', 'socket.io', 'client-dist', 'socket.io.js'));
 });
 
 // Debug middleware
