@@ -23,12 +23,11 @@ const server = http.createServer(app);
 // Socket.IO Configuration
 const io = socketIo(server, {
     cors: {
-        origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com', 'https://altear-video-meeting.onrender.com'],
-        methods: ['GET', 'POST', 'OPTIONS'],
-        credentials: true,
-        allowedHeaders: ['Content-Type', 'Authorization']
+        origin: '*',
+        methods: ['GET', 'POST'],
+        credentials: true
     },
-    path: '/socket.io/'
+    transports: ['websocket', 'polling']
 });
 
 // MongoDB Connection

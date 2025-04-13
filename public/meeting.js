@@ -1,5 +1,5 @@
-// Import Socket.IO client
-import { io } from 'socket.io-client';
+// Use the global socket object initialized in the HTML
+const socket = window.socket;
 
 // Get the API URL based on environment
 const API_URL = window.location.origin.includes('vercel') 
@@ -64,16 +64,6 @@ let isAudioEnabled = true;
 let isVideoEnabled = true;
 let isSpeechToTextActive = false;
 let speechRecognition = null;
-
-// Socket.IO Connection with debug logging
-console.log('Connecting to Socket.IO server at:', API_URL);
-const socket = io(API_URL, {
-    transports: ['websocket', 'polling'],
-    reconnection: true,
-    reconnectionAttempts: 5,
-    reconnectionDelay: 1000,
-    timeout: 20000
-});
 
 // Debug connection events
 socket.on('connect', () => {
