@@ -6,43 +6,10 @@ const cors = require('cors');
 const path = require('path');
 require('dotenv').config();
 
-// Handle uncaught exceptions
-process.on('uncaughtException', (error) => {
-    console.error('Uncaught Exception:', error);
-    // Don't exit the process, just log the error
-});
-
-// Handle unhandled promise rejections
-process.on('unhandledRejection', (reason, promise) => {
-    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
-    // Don't exit the process, just log the error
-});
-
-// Function to check if a port is in use
-function isPortInUse(port) {
-    return new Promise((resolve) => {
-        const server = net.createServer()
-            .once('error', () => resolve(true))
-            .once('listening', () => {
-                server.once('close', () => resolve(false)).close();
-            })
-            .listen(port);
-    });
-}
-
-// Function to find an available port
-async function findAvailablePort(startPort) {
-    let port = startPort;
-    while (await isPortInUse(port)) {
-        port++;
-    }
-    return port;
-}
-
 // Create Express app
 const app = express();
 app.use(cors({
-    origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com'],
+    origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com', 'https://altear-video-meeting.onrender.com'],
     methods: ['GET', 'POST', 'OPTIONS'],
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization']
@@ -56,22 +23,11 @@ const server = http.createServer(app);
 // Socket.IO Configuration
 const io = socketIo(server, {
     cors: {
-        origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com'],
+        origin: ['https://altear.vercel.app', 'http://localhost:3000', 'https://altear.onrender.com', 'https://altear-video-meeting.onrender.com'],
         methods: ['GET', 'POST', 'OPTIONS'],
         credentials: true,
         allowedHeaders: ['Content-Type', 'Authorization']
     }
-});
-
-// Serve Socket.IO client
-app.get('/socket.io/socket.io.js', (req, res) => {
-    res.sendFile(path.join(__dirname, 'node_modules', 'socket.io', 'client-dist', 'socket.io.js'));
-});
-
-// Debug middleware
-app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
-    next();
 });
 
 // MongoDB Connection
@@ -255,18 +211,8 @@ function generateMeetingId() {
 }
 
 // Start the server
-const PORT = process.env.PORT || 10000;
+const PORT = process.env.PORT || 8181;
 server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
-    console.log(`Server URL: https://altear.onrender.com`);
-});
-
-// Handle process termination
-process.on('SIGINT', () => {
-    console.log('Server shutting down...');
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    console.log('Server shutting down...');
-    process.exit(0); 
+    console.log(`Server URL: https://altear-video-meeting.onrender.com`);
+}); 

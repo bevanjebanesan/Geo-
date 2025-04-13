@@ -8,17 +8,32 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
 <body>
-    <div class="meeting-container">
+    <div id="joinContainer" class="join-container">
+        <h1>Join Meeting</h1>
+        <div class="join-form">
+            <input type="text" id="meetingIdInput" placeholder="Meeting ID">
+            <input type="text" id="usernameInput" placeholder="Your Name">
+            <input type="text" id="usernameInputJoin" placeholder="Your Name" style="display: none;">
+            <button id="joinButton">Join</button>
+            <button id="createButton">Create New Meeting</button>
+        </div>
+    </div>
+
+    <div id="meetingContainer" class="meeting-container" style="display: none;">
         <div class="meeting-header">
             <h1>Altear Video Meeting</h1>
             <div class="meeting-info">
-                <span id="meetingId">Meeting ID: </span>
-                <span id="participantCount">Participants: 0</span>
+                <span id="meetingIdDisplay">Meeting ID: </span>
+                <span id="usernameDisplay">Username: </span>
+                <span id="participantCountDisplay">Participants: 0</span>
             </div>
         </div>
 
-        <div class="video-grid" id="videoGrid">
-            <!-- Video elements will be added here dynamically -->
+        <div class="video-container">
+            <video id="localVideo" autoplay playsinline muted></video>
+            <div id="remoteVideos" class="remote-videos">
+                <!-- Remote video elements will be added here dynamically -->
+            </div>
         </div>
 
         <div class="participants-list" id="participantsList">
@@ -28,16 +43,36 @@
             </ul>
         </div>
 
+        <div class="chat-container">
+            <div id="chatMessages" class="chat-messages">
+                <!-- Chat messages will be added here dynamically -->
+            </div>
+            <div class="chat-input">
+                <input type="text" id="messageInput" placeholder="Type a message...">
+                <button id="sendButton">Send</button>
+            </div>
+        </div>
+
         <div class="meeting-controls">
-            <button id="toggleAudio" class="control-button">
+            <button id="audioButton" class="control-button">
                 <i class="fas fa-microphone"></i>
             </button>
-            <button id="toggleVideo" class="control-button">
+            <button id="videoButton" class="control-button">
                 <i class="fas fa-video"></i>
             </button>
-            <button id="leaveMeeting" class="control-button leave-button">
+            <button id="screenShareButton" class="control-button">
+                <i class="fas fa-desktop"></i>
+            </button>
+            <button id="speechToTextButton" class="control-button">
+                <i class="fas fa-microphone-alt"></i>
+            </button>
+            <button id="leaveButton" class="control-button leave-button">
                 <i class="fas fa-phone-slash"></i>
             </button>
+        </div>
+
+        <div id="speechText" class="speech-text">
+            <!-- Speech-to-text output will be displayed here -->
         </div>
     </div>
 
@@ -45,29 +80,6 @@
     <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     
     <!-- Then load your meeting.js -->
-    <script>
-        // Socket.IO client configuration
-        const socket = io('https://altear.onrender.com', {
-            transports: ['websocket', 'polling'],
-            reconnection: true,
-            reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            secure: true
-        });
-
-        // Debug connection
-        socket.on('connect', () => {
-            console.log('Connected to server');
-        });
-
-        socket.on('connect_error', (error) => {
-            console.error('Connection error:', error);
-        });
-
-        socket.on('disconnect', () => {
-            console.log('Disconnected from server');
-        });
-    </script>
     <script src="meeting.js"></script>
 </body>
 </html> 

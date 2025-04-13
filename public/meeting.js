@@ -252,6 +252,17 @@ socket.on('error', ({ message }) => {
     alert('Error: ' + message);
 });
 
+socket.on('chatMessage', ({ username, message }) => {
+    const messageElement = document.createElement('div');
+    messageElement.className = 'chat-message';
+    messageElement.innerHTML = `
+        <span class="chat-username">${username}:</span>
+        <span class="chat-content">${message}</span>
+    `;
+    chatMessages.appendChild(messageElement);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+});
+
 // Create peer connection
 function createPeerConnection(socketId, username) {
     if (!peerConnections[socketId]) {
@@ -352,7 +363,53 @@ videoButton.addEventListener('click', () => {
     }
 });
 
+screenShareButton.addEventListener('click', async () => {
+    try {
+        const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+        localStream.getVideoTracks().forEach(track => track.stop());
+        screenStream.getVideoTracks().forEach(track => {
+            localStream.addTrack(track);
+            Object.values(peerConnections).forEach(peerConnection => {
+                peerConnection.addTrack(track, localStream);
+            });
+        });
+        localVideo.srcObject = localStream;
+        screenShareButton.classList.add('active');
+    } catch (error) {
+        console.error('Error sharing screen:', error);
+    }
+});
+
 speechToTextButton.addEventListener('click', toggleSpeechToText);
+
+leaveButton.addEventListener('click', () => {
+    if (confirm('Are you sure you want to leave the meeting?')) {
+        // Stop all media tracks
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+        }
+        
+        // Close all peer connections
+        Object.values(peerConnections).forEach(peerConnection => {
+            peerConnection.close();
+        });
+        peerConnections = {};
+        
+        // Emit leave meeting event
+        socket.emit('leaveMeeting', { meetingId: currentMeetingId });
+        
+        // Reset state
+        currentMeetingId = null;
+        currentUsername = null;
+        localStream = null;
+        
+        // Update UI
+        meetingContainer.style.display = 'none';
+        joinContainer.style.display = 'block';
+        videoGrid.innerHTML = '';
+        participantsList.innerHTML = '';
+    }
+});
 
 sendButton.addEventListener('click', () => {
     const message = messageInput.value.trim();
@@ -431,5 +488,28 @@ document.addEventListener('DOMContentLoaded', () => {
         createMeeting();
     } else if (action === '2') {
         joinMeeting();
+    }
+});
+
+// Add event listeners for join and create buttons
+joinButton.addEventListener('click', () => {
+    const meetingId = meetingIdInput.value.trim();
+    const username = usernameInput.value.trim();
+    if (meetingId && username) {
+        currentUsername = username;
+        currentMeetingId = meetingId;
+        socket.emit('joinMeeting', { meetingId, username });
+    } else {
+        alert('Please enter both meeting ID and your name');
+    }
+});
+
+createButton.addEventListener('click', () => {
+    const username = usernameInput.value.trim();
+    if (username) {
+        currentUsername = username;
+        socket.emit('createMeeting', { username });
+    } else {
+        alert('Please enter your name');
     }
 }); 
