@@ -269,5 +269,4 @@ process.on('SIGINT', () => {
 
 process.on('SIGTERM', () => {
     console.log('Server shutting down...');
-    process.exit(0);
-}); 
+    process.exit(0); 

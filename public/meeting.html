@@ -51,7 +51,8 @@
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
-            reconnectionDelay: 1000
+            reconnectionDelay: 1000,
+            secure: true
         });
 
         // Debug connection
@@ -61,6 +62,10 @@
 
         socket.on('connect_error', (error) => {
             console.error('Connection error:', error);
+        });
+
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
         });
     </script>
     <script src="meeting.js"></script>
