@@ -42,7 +42,7 @@ async function findAvailablePort(startPort) {
 // Create Express app
 const app = express();
 app.use(cors({
-    origin: ['https://altear.vercel.app', 'http://localhost:3000', 'http://localhost:8181', 'https://altear-video-meeting.onrender.com'],
+    origin: ['https://altear.vercel.app', 'http://localhost:3000'],
     methods: ['GET', 'POST'],
     credentials: true
 }));
@@ -55,7 +55,7 @@ const server = http.createServer(app);
 // Socket.IO Configuration
 const io = socketIo(server, {
     cors: {
-        origin: ['https://altear.vercel.app', 'http://localhost:3000', 'http://localhost:8181', 'https://altear-video-meeting.onrender.com'],
+        origin: ['https://altear.vercel.app', 'http://localhost:3000'],
         methods: ['GET', 'POST'],
         credentials: true
     },
@@ -221,39 +221,35 @@ io.on('connection', (socket) => {
     // Handle disconnection
     socket.on('disconnect', async () => {
         console.log('Client disconnected:', socket.id);
-        
-        // Find and update all meetings where this socket was a participant
-        const meetings = await Meeting.find({ 'participants.socketId': socket.id });
-        for (const meeting of meetings) {
-            const participantIndex = meeting.participants.findIndex(p => p.socketId === socket.id);
-            if (participantIndex !== -1) {
-                const participant = meeting.participants[participantIndex];
-                meeting.participants.splice(participantIndex, 1);
-                
-                if (meeting.participants.length === 0) {
-                    // If no participants left, delete the meeting
-                    await Meeting.findByIdAndDelete(meeting._id);
-                    activeMeetings.delete(meeting.meetingId);
-                } else {
+        try {
+            // Find and update all meetings where this socket was a participant
+            const meetings = await Meeting.find({ 'participants.socketId': socket.id });
+            for (const meeting of meetings) {
+                const participant = meeting.participants.find(p => p.socketId === socket.id);
+                if (participant) {
+                    meeting.participants = meeting.participants.filter(p => p.socketId !== socket.id);
                     await meeting.save();
-                    // Notify remaining participants
+                    
+                    // Notify other participants
                     socket.to(meeting.meetingId).emit('participantLeft', {
                         socketId: socket.id,
                         username: participant.username
                     });
                 }
             }
+        } catch (error) {
+            console.error('Error handling disconnection:', error);
         }
     });
 });
 
-// Helper function to generate a unique meeting ID
+// Generate a random meeting ID
 function generateMeetingId() {
     return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-// Start server
-const PORT = process.env.PORT || 10000;
+// Start the server
+const PORT = process.env.PORT || 8181;
 server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
 });
