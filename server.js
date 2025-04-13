@@ -1,11 +1,11 @@
 const express = require('express');
-const https = require('https');
 const http = require('http');
-const fs = require('fs');
 const socketIo = require('socket.io');
+const mongoose = require('mongoose');
+const cors = require('cors');
 const path = require('path');
-const net = require('net');
 const { execSync } = require('child_process');
+require('dotenv').config();
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
@@ -65,305 +65,213 @@ try {
 
 // Create Express app
 const app = express();
-
-// CORS middleware
-app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    if (req.method === 'OPTIONS') {
-        return res.sendStatus(200);
-    }
-    next();
-});
-
-// Serve static files
+app.use(cors({
+    origin: process.env.FRONTEND_URL || '*',
+    methods: ['GET', 'POST'],
+    credentials: true
+}));
+app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// Create HTTPS server
-const httpsServer = https.createServer(sslOptions, app);
+// Create HTTP server
+const server = http.createServer(app);
 
 // Socket.IO Configuration
-const io = socketIo(httpsServer, {
+const io = socketIo(server, {
     cors: {
-        origin: "*",
-        methods: ["GET", "POST", "OPTIONS"],
-        allowedHeaders: ["my-custom-header"],
+        origin: process.env.FRONTEND_URL || '*',
+        methods: ['GET', 'POST'],
         credentials: true
-    },
-    transports: ['polling', 'websocket'],
-    pingTimeout: 60000,
-    pingInterval: 25000
+    }
 });
 
-// Start the server
-httpsServer.listen(8181, '0.0.0.0', async () => {
-    const localIp = '192.168.0.100';
-    console.log(`HTTPS Server running on port 8181`);
-    console.log(`Local: https://localhost:8181`);
-    console.log(`Network: https://${localIp}:8181`);
+// MongoDB Connection
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://bevan_admin:bevan_123@lemon0.ybuuqu2.mongodb.net/ashlin?retryWrites=true&w=majority&appName=Lemon0';
+
+mongoose.connect(MONGODB_URI)
+    .then(() => console.log('Connected to MongoDB'))
+    .catch(err => console.error('MongoDB connection error:', err));
+
+// Meeting Schema
+const meetingSchema = new mongoose.Schema({
+    meetingId: { type: String, required: true, unique: true },
+    participants: [{
+        socketId: String,
+        username: String,
+        audioEnabled: { type: Boolean, default: true },
+        videoEnabled: { type: Boolean, default: true }
+    }],
+    createdAt: { type: Date, default: Date.now }
 });
 
-// Active meetings and participants
+const Meeting = mongoose.model('Meeting', meetingSchema);
+
+// Store active meetings
 const activeMeetings = new Map();
-const participants = new Map();
 
-// Function to handle socket connections
-function handleSocketConnection(socket, isSecure) {
-    console.log(`New client connected: ${socket.id} (${isSecure ? 'HTTPS' : 'HTTP'})`);
-    
-    // Handle authentication
-    socket.on('authenticate', (data) => {
-        const { userName } = data;
-        participants.set(socket.id, {
-            id: socket.id,
-            userName,
-            meetingId: null,
-            audioEnabled: true,
-            videoEnabled: true
-        });
-        console.log(`Client authenticated: ${socket.id} (${userName})`);
-        socket.emit('authenticated', { userName });
-    });
-    
-    // Handle meeting creation
-    socket.on('createMeeting', (data) => {
-        const { username } = data;
-        const meetingId = generateMeetingId();
-        const participant = {
-            id: socket.id,
-            userName: username,
-            audioEnabled: true,
-            videoEnabled: true
-        };
-        
-        activeMeetings.set(meetingId, {
-            id: meetingId,
-            participants: [socket.id],
-            createdBy: socket.id
-        });
-        
-        participants.set(socket.id, {
-            ...participant,
-            meetingId
-        });
-        
-        console.log(`Meeting created: ${meetingId} by ${username}`);
-        socket.emit('meetingCreated', { meetingId });
-    });
-    
-    // Handle joining meeting
-    socket.on('joinMeeting', (data) => {
-        const { meetingId, username } = data;
-        const meeting = activeMeetings.get(meetingId);
-        
-        if (!meeting) {
-            socket.emit('error', { message: 'Meeting not found' });
-            return;
-        }
-        
-        const participant = {
-            id: socket.id,
-            userName: username,
-            audioEnabled: true,
-            videoEnabled: true
-        };
-        
-        meeting.participants.push(socket.id);
-        participants.set(socket.id, {
-            ...participant,
-            meetingId
-        });
-        
-        console.log(`User ${username} joined meeting: ${meetingId}`);
-        console.log(`Current participants in meeting ${meetingId}:`, meeting.participants.map(id => participants.get(id)?.userName));
-        
-        // Notify all participants in the meeting
-        meeting.participants.forEach(participantId => {
-            const participantSocket = io.sockets.sockets.get(participantId);
-            if (participantSocket) {
-                participantSocket.emit('participantJoined', {
-                    userId: socket.id,
-                    userName: username,
+// Socket.IO Connection Handling
+io.on('connection', (socket) => {
+    console.log('New client connected:', socket.id);
+
+    // Create a new meeting
+    socket.on('createMeeting', async ({ username }) => {
+        try {
+            const meetingId = generateMeetingId();
+            const meeting = new Meeting({
+                meetingId,
+                participants: [{
+                    socketId: socket.id,
+                    username,
                     audioEnabled: true,
                     videoEnabled: true
-                });
-            }
-        });
-        
-        socket.emit('meetingJoined', {
-            meetingId,
-            participants: meeting.participants.map(id => ({
-                userId: id,
-                userName: participants.get(id)?.userName,
-                audioEnabled: participants.get(id)?.audioEnabled,
-                videoEnabled: participants.get(id)?.videoEnabled
-            }))
-        });
-    });
-    
-    // Handle WebRTC signaling
-    socket.on('offer', (data) => {
-        const { offer, to } = data;
-        const targetSocket = io.sockets.sockets.get(to);
-        if (targetSocket) {
-            targetSocket.emit('offer', { offer, from: socket.id });
-        }
-    });
-    
-    socket.on('answer', (data) => {
-        const { answer, to } = data;
-        const targetSocket = io.sockets.sockets.get(to);
-        if (targetSocket) {
-            targetSocket.emit('answer', { answer, from: socket.id });
-        }
-    });
-    
-    socket.on('iceCandidate', (data) => {
-        const { candidate, to } = data;
-        const targetSocket = io.sockets.sockets.get(to);
-        if (targetSocket) {
-            targetSocket.emit('iceCandidate', { candidate, from: socket.id });
-        }
-    });
-    
-    // Handle media state changes
-    socket.on('audioStateChange', (data) => {
-        const { enabled } = data;
-        const participant = participants.get(socket.id);
-        
-        if (participant) {
-            participant.audioEnabled = enabled;
-            
-            // Notify other participants in the same meeting
-            if (participant.meetingId) {
-                const meeting = activeMeetings.get(participant.meetingId);
-                if (meeting) {
-                    meeting.participants.forEach(participantId => {
-                        if (participantId !== socket.id) {
-                            const participantSocket = io.sockets.sockets.get(participantId);
-                            if (participantSocket) {
-                                participantSocket.emit('participantAudioStateChange', {
-                                    id: socket.id,
-                                    enabled
-                                });
-                            }
-                        }
-                    });
-                }
-            }
-        }
-    });
-    
-    socket.on('videoStateChange', (data) => {
-        const { enabled } = data;
-        const participant = participants.get(socket.id);
-        
-        if (participant) {
-            participant.videoEnabled = enabled;
-            
-            // Notify other participants in the same meeting
-            if (participant.meetingId) {
-                const meeting = activeMeetings.get(participant.meetingId);
-                if (meeting) {
-                    meeting.participants.forEach(participantId => {
-                        if (participantId !== socket.id) {
-                            const participantSocket = io.sockets.sockets.get(participantId);
-                            if (participantSocket) {
-                                participantSocket.emit('participantVideoStateChange', {
-                                    id: socket.id,
-                                    enabled
-                                });
-                            }
-                        }
-                    });
-                }
-            }
-        }
-    });
-    
-    // Handle chat messages
-    socket.on('chatMessage', (data) => {
-        const { meetingId, message, username } = data;
-        const meeting = activeMeetings.get(meetingId);
-        
-        if (meeting) {
-            meeting.participants.forEach(participantId => {
-                const participantSocket = io.sockets.sockets.get(participantId);
-                if (participantSocket) {
-                    participantSocket.emit('chatMessage', { message, username });
-                }
+                }]
             });
+            await meeting.save();
+            
+            activeMeetings.set(meetingId, meeting);
+            socket.join(meetingId);
+            socket.emit('meetingCreated', { meetingId });
+            console.log(`Meeting created: ${meetingId} by ${username}`);
+        } catch (error) {
+            console.error('Error creating meeting:', error);
+            socket.emit('error', { message: 'Failed to create meeting' });
         }
     });
-    
-    // Handle leaving meeting
-    socket.on('leaveMeeting', (data) => {
-        const { meetingId } = data;
-        const participant = participants.get(socket.id);
-        
-        if (participant && participant.meetingId === meetingId) {
-            const meeting = activeMeetings.get(meetingId);
+
+    // Join an existing meeting
+    socket.on('joinMeeting', async ({ meetingId, username }) => {
+        try {
+            const meeting = await Meeting.findOne({ meetingId });
+            if (!meeting) {
+                socket.emit('error', { message: 'Meeting not found' });
+                return;
+            }
+
+            meeting.participants.push({
+                socketId: socket.id,
+                username,
+                audioEnabled: true,
+                videoEnabled: true
+            });
+            await meeting.save();
+            
+            activeMeetings.set(meetingId, meeting);
+            socket.join(meetingId);
+            
+            // Notify existing participants
+            socket.to(meetingId).emit('participantJoined', {
+                socketId: socket.id,
+                username,
+                audioEnabled: true,
+                videoEnabled: true
+            });
+
+            // Send list of existing participants to the new joiner
+            const participants = meeting.participants.map(p => ({
+                socketId: p.socketId,
+                username: p.username,
+                audioEnabled: p.audioEnabled,
+                videoEnabled: p.videoEnabled
+            }));
+            socket.emit('participantsList', participants);
+            
+            console.log(`${username} joined meeting: ${meetingId}`);
+        } catch (error) {
+            console.error('Error joining meeting:', error);
+            socket.emit('error', { message: 'Failed to join meeting' });
+        }
+    });
+
+    // Handle WebRTC signaling
+    socket.on('offer', ({ to, offer }) => {
+        socket.to(to).emit('offer', { from: socket.id, offer });
+    });
+
+    socket.on('answer', ({ to, answer }) => {
+        socket.to(to).emit('answer', { from: socket.id, answer });
+    });
+
+    socket.on('ice-candidate', ({ to, candidate }) => {
+        socket.to(to).emit('ice-candidate', { from: socket.id, candidate });
+    });
+
+    // Handle media state changes
+    socket.on('audioStateChange', async ({ meetingId, enabled }) => {
+        try {
+            const meeting = await Meeting.findOne({ meetingId });
             if (meeting) {
-                // Remove participant from meeting
-                meeting.participants = meeting.participants.filter(id => id !== socket.id);
-                
-                // Notify other participants
-                meeting.participants.forEach(participantId => {
-                    const participantSocket = io.sockets.sockets.get(participantId);
-                    if (participantSocket) {
-                        participantSocket.emit('participantLeft', {
-                            id: socket.id
-                        });
-                    }
-                });
-                
-                // Update participant's meeting
-                participant.meetingId = null;
-                
-                // Remove meeting if empty
-                if (meeting.participants.length === 0) {
-                    activeMeetings.delete(meetingId);
+                const participant = meeting.participants.find(p => p.socketId === socket.id);
+                if (participant) {
+                    participant.audioEnabled = enabled;
+                    await meeting.save();
+                    socket.to(meetingId).emit('participantAudioChanged', {
+                        socketId: socket.id,
+                        enabled
+                    });
                 }
             }
+        } catch (error) {
+            console.error('Error updating audio state:', error);
         }
     });
-    
+
+    socket.on('videoStateChange', async ({ meetingId, enabled }) => {
+        try {
+            const meeting = await Meeting.findOne({ meetingId });
+            if (meeting) {
+                const participant = meeting.participants.find(p => p.socketId === socket.id);
+                if (participant) {
+                    participant.videoEnabled = enabled;
+                    await meeting.save();
+                    socket.to(meetingId).emit('participantVideoChanged', {
+                        socketId: socket.id,
+                        enabled
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error updating video state:', error);
+        }
+    });
+
     // Handle disconnection
-    socket.on('disconnect', () => {
-        console.log(`Client disconnected: ${socket.id}`);
-        const participant = participants.get(socket.id);
+    socket.on('disconnect', async () => {
+        console.log('Client disconnected:', socket.id);
         
-        if (participant && participant.meetingId) {
-            const meeting = activeMeetings.get(participant.meetingId);
-            if (meeting) {
-                // Remove participant from meeting
-                meeting.participants = meeting.participants.filter(id => id !== socket.id);
+        // Find and update all meetings where this socket was a participant
+        const meetings = await Meeting.find({ 'participants.socketId': socket.id });
+        for (const meeting of meetings) {
+            const participantIndex = meeting.participants.findIndex(p => p.socketId === socket.id);
+            if (participantIndex !== -1) {
+                const participant = meeting.participants[participantIndex];
+                meeting.participants.splice(participantIndex, 1);
                 
-                // Notify other participants
-                meeting.participants.forEach(participantId => {
-                    const participantSocket = io.sockets.sockets.get(participantId);
-                    if (participantSocket) {
-                        participantSocket.emit('participantLeft', {
-                            id: socket.id
-                        });
-                    }
-                });
-                
-                // Remove meeting if empty
                 if (meeting.participants.length === 0) {
-                    activeMeetings.delete(participant.meetingId);
+                    // If no participants left, delete the meeting
+                    await Meeting.findByIdAndDelete(meeting._id);
+                    activeMeetings.delete(meeting.meetingId);
+                } else {
+                    await meeting.save();
+                    // Notify remaining participants
+                    socket.to(meeting.meetingId).emit('participantLeft', {
+                        socketId: socket.id,
+                        username: participant.username
+                    });
                 }
             }
         }
-        
-        participants.delete(socket.id);
     });
+});
+
+// Helper function to generate a unique meeting ID
+function generateMeetingId() {
+    return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
 
-// Set up Socket.IO event handlers
-io.on('connection', (socket) => {
-    handleSocketConnection(socket, true);
+// Start server
+const PORT = process.env.PORT || 10000;
+server.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });
 
 // Handle process termination
@@ -375,14 +283,4 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
     console.log('Server shutting down...');
     process.exit(0);
-});
-
-// Helper function to generate a unique meeting ID
-function generateMeetingId() {
-    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 10; i++) {
-        result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-} 
+}); 

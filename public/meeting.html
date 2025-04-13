@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Altear - Video Meeting</title>
     <link rel="stylesheet" href="styles.css">
-    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://altear-video-meeting.onrender.com/socket.io/socket.io.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 </head>
 <body>
@@ -15,9 +15,6 @@
             <div class="meeting-info">
                 <h2 id="meetingId">Meeting ID: <span id="meetingIdDisplay"></span></h2>
                 <p id="participantCount">Participants: <span id="participantCountDisplay">0</span></p>
-            </div>
-            <div class="meeting-controls">
-                <button id="leaveButton" class="control-button leave">Leave Meeting</button>
             </div>
         </div>
 
@@ -31,7 +28,7 @@
                 </div>
             </div>
 
-            <!-- Sidebar with Participants and Chat -->
+            <!-- Sidebar with Participants -->
             <div class="sidebar">
                 <!-- Participants List -->
                 <div class="participants-section">
@@ -43,39 +40,18 @@
                         <!-- Participants will be added here dynamically -->
                     </div>
                 </div>
-
-                <!-- Chat Section -->
-                <div class="chat-section">
-                    <div class="section-header">
-                        <h3>Chat</h3>
-                    </div>
-                    <div class="chat-messages" id="chatMessages"></div>
-                    <div class="chat-input">
-                        <input type="text" id="messageInput" placeholder="Type a message...">
-                        <button id="sendButton">Send</button>
-                    </div>
-                </div>
             </div>
         </div>
 
         <!-- Bottom Controls -->
         <div class="meeting-controls bottom-controls">
-            <button id="audioButton" class="control-button">
+            <button id="audioButton" class="control-button" title="Toggle Audio">
                 <i class="fas fa-microphone"></i>
             </button>
-            <button id="videoButton" class="control-button">
+            <button id="videoButton" class="control-button" title="Toggle Video">
                 <i class="fas fa-video"></i>
             </button>
-            <button id="screenShareButton" class="control-button">
-                <i class="fas fa-desktop"></i>
-            </button>
-            <button id="speechToTextButton" class="control-button">
-                <i class="fas fa-comment-alt"></i>
-            </button>
         </div>
-
-        <!-- Speech-to-Text Container -->
-        <div id="speechTextContainer" class="speech-text-container"></div>
     </div>
 
     <script src="meeting.js"></script>
