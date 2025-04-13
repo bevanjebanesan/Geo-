@@ -1,6 +1,108 @@
-# Altear - Video Meeting Application
+# Altear - Secure Video Meetings
 
-Altear is a WebRTC-based video meeting application that allows users to create and join meetings with real-time audio and video communication.
+A secure, real-time video meeting application built with WebRTC, Socket.IO, and Node.js.
+
+## Working Features
+
+### Server Configuration
+- ✅ HTTPS server running on port 8181
+- ✅ Accessible both locally (localhost) and on the network (192.168.0.100)
+- ✅ Automatic SSL certificate generation and management
+- ✅ CORS support for cross-origin requests
+
+### WebRTC Implementation
+- ✅ TURN servers for NAT traversal
+- ✅ STUN servers for peer discovery
+- ✅ Proper ICE candidate handling
+- ✅ Improved connection state management
+- ✅ Automatic reconnection on connection failure
+- ✅ Better error handling and logging
+
+### Media Handling
+- ✅ Video and audio streaming
+- ✅ Screen sharing capability
+- ✅ Media state management (mute/unmute, video on/off)
+- ✅ Proper track handling for peer connections
+- ✅ Improved signaling state management
+
+### User Interface
+- ✅ Clean and functional meeting interface
+- ✅ Participant list with status indicators
+- ✅ Working media controls
+- ✅ Chat functionality
+- ✅ Speech-to-text support
+- ✅ Share meeting link feature
+
+## Setup Instructions
+
+1. Clone the repository:
+```bash
+git clone https://github.com/bevanjebanesan/Geo-.git
+cd Geo-
+```
+
+2. Install dependencies:
+```bash
+npm install
+```
+
+3. Start the server:
+```bash
+node server.js
+```
+
+4. Access the application:
+- Local: https://localhost:8181
+- Network: https://192.168.0.100:8181
+
+## Known Working Features
+
+### Meeting Creation and Joining
+- Create new meetings
+- Join existing meetings
+- Share meeting links
+- Participant management
+
+### Media Controls
+- Toggle video on/off
+- Toggle audio on/off
+- Screen sharing
+- Speech-to-text
+
+### Connection Management
+- Automatic reconnection
+- NAT traversal
+- Firewall traversal
+- Connection state monitoring
+
+## Troubleshooting
+
+If you experience connection issues:
+1. Ensure you have granted camera and microphone permissions
+2. Check your network connection
+3. Verify that port 8181 is accessible
+4. Check the browser console for any error messages
+
+## Security Features
+
+- HTTPS encryption
+- Secure WebRTC connections
+- Protected media streams
+- Secure signaling through Socket.IO
+
+## Browser Support
+
+- Chrome (recommended)
+- Firefox
+- Safari
+- Edge
+
+## Notes
+
+- This is a working version of the application
+- All features listed above are confirmed to be working
+- The code is optimized for real-time communication
+- Includes proper error handling and recovery mechanisms
 
 ## Features
 
@@ -21,60 +123,6 @@ Altear is a WebRTC-based video meeting application that allows users to create a
 - **WebRTC**: For peer-to-peer audio and video streaming
 - **HTTPS**: Secure communication with SSL certificates
 
-## Setup and Installation
-
-### Prerequisites
-
-- Node.js (v14 or higher)
-- npm (v6 or higher)
-- SSL certificates for HTTPS
-
-### Installation
-
-1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/altear.git
-   cd altear
-   ```
-
-2. Install dependencies:
-   ```
-   npm install
-   ```
-
-3. Generate SSL certificates (if not already available):
-   ```
-   mkcert create-ca
-   mkcert create-cert
-   ```
-
-4. Start the server:
-   ```
-   node server.js
-   ```
-
-5. Access the application:
-   - Local: https://localhost:8181
-   - Network: https://your-ip-address:8181
-
-## Usage
-
-1. **Creating a Meeting**:
-   - Enter your name
-   - Click "Create Meeting"
-   - Share the meeting ID with others
-
-2. **Joining a Meeting**:
-   - Enter your name
-   - Enter the meeting ID
-   - Click "Join Meeting"
-
-3. **During a Meeting**:
-   - Toggle audio/video using the respective buttons
-   - Share your screen using the screen share button
-   - Copy the meeting link to invite others
-   - End the meeting using the end call button
-
 ## Architecture
 
 The application uses a client-server architecture with WebRTC for peer-to-peer communication:
@@ -82,12 +130,6 @@ The application uses a client-server architecture with WebRTC for peer-to-peer c
 - **Server**: Handles signaling and meeting management
 - **Client**: Manages WebRTC connections and UI
 - **Signaling**: Uses Socket.IO for exchanging WebRTC signaling information
-
-## Security Considerations
-
-- HTTPS is used for all communications
-- Authentication is required for socket connections
-- WebRTC connections are encrypted
 
 ## License
 
