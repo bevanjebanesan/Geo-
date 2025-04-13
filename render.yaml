@@ -8,4 +8,6 @@ services:
       - key: MONGODB_URI
         value: mongodb+srv://bevan_admin:bevan_123@lemon0.ybuuqu2.mongodb.net/ashlin?retryWrites=true&w=majority&appName=Lemon0
       - key: NODE_ENV
-        value: production 
+        value: production
+      - key: PORT
+        value: 10000 
