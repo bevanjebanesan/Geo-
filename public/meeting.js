@@ -1,3 +1,9 @@
+// Import Socket.IO client
+import { io } from 'socket.io-client';
+
+// Get the API URL from environment variable or use default
+const API_URL = import.meta.env.VITE_API_URL || 'https://altear-video-meeting.onrender.com';
+
 // DOM Elements
 const joinContainer = document.getElementById('joinContainer');
 const meetingContainer = document.getElementById('meetingContainer');
@@ -58,7 +64,7 @@ let isSpeechToTextActive = false;
 let speechRecognition = null;
 
 // Socket.IO Connection
-const socket = io('https://altear-video-meeting.onrender.com', {
+const socket = io(API_URL, {
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: 5,
