@@ -42,7 +42,7 @@ async function findAvailablePort(startPort) {
 // Create Express app
 const app = express();
 app.use(cors({
-    origin: process.env.FRONTEND_URL || '*',
+    origin: ['https://altear.vercel.app', 'http://localhost:3000'],
     methods: ['GET', 'POST'],
     credentials: true
 }));
@@ -55,10 +55,16 @@ const server = http.createServer(app);
 // Socket.IO Configuration
 const io = socketIo(server, {
     cors: {
-        origin: process.env.FRONTEND_URL || '*',
+        origin: ['https://altear.vercel.app', 'http://localhost:3000'],
         methods: ['GET', 'POST'],
         credentials: true
     }
+});
+
+// Debug middleware
+app.use((req, res, next) => {
+    console.log(`${req.method} ${req.url}`);
+    next();
 });
 
 // MongoDB Connection
@@ -92,6 +98,7 @@ io.on('connection', (socket) => {
     // Create a new meeting
     socket.on('createMeeting', async ({ username }) => {
         try {
+            console.log('Creating meeting for user:', username);
             const meetingId = generateMeetingId();
             const meeting = new Meeting({
                 meetingId,

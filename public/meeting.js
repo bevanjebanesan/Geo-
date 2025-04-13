@@ -66,6 +66,19 @@ const socket = io('https://altear-video-meeting.onrender.com', {
     timeout: 20000
 });
 
+// Debug connection events
+socket.on('connect', () => {
+    console.log('Connected to server');
+});
+
+socket.on('connect_error', (error) => {
+    console.error('Connection error:', error);
+});
+
+socket.on('disconnect', (reason) => {
+    console.log('Disconnected from server:', reason);
+});
+
 // Initialize Speech Recognition
 function initializeSpeechToText() {
     if ('webkitSpeechRecognition' in window) {
@@ -147,6 +160,7 @@ async function initializeMedia() {
 function createMeeting() {
     const username = prompt('Enter your name:');
     if (username) {
+        console.log('Creating meeting for user:', username);
         currentUsername = username;
         socket.emit('createMeeting', { username });
     }
@@ -165,6 +179,7 @@ function joinMeeting() {
 
 // Socket event handlers
 socket.on('meetingCreated', ({ meetingId }) => {
+    console.log('Meeting created with ID:', meetingId);
     currentMeetingId = meetingId;
     meetingIdDisplay.textContent = meetingId;
     usernameDisplay.textContent = currentUsername;
@@ -230,6 +245,11 @@ socket.on('participantsList', (participants) => {
         }
     });
     updateParticipantsList();
+});
+
+socket.on('error', ({ message }) => {
+    console.error('Server error:', message);
+    alert('Error: ' + message);
 });
 
 // Create peer connection
