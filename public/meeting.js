@@ -1,9 +1,9 @@
 // Get the WebSocket URL based on environment
 const WS_URL = window.location.origin.includes('vercel') 
-    ? 'wss://altear-video-meeting.onrender.com'
+    ? 'wss://altear-video-meeting.onrender.com/ws'
     : window.location.protocol === 'https:'
-        ? 'wss://altear-video-meeting.onrender.com'
-        : 'ws://localhost:8181';
+        ? 'wss://altear-video-meeting.onrender.com/ws'
+        : 'ws://localhost:8181/ws';
 
 // DOM Elements
 const joinContainer = document.getElementById('joinContainer');
@@ -93,6 +93,22 @@ function initWebSocket() {
                     break;
                 case 'error':
                     alert(data.message);
+                    break;
+                case 'participantJoined':
+                    updateParticipantsList([{ username: data.username }]);
+                    break;
+                case 'participantLeft':
+                    updateParticipantsList([]);
+                    break;
+                case 'chatMessage':
+                    const messageElement = document.createElement('div');
+                    messageElement.className = 'chat-message';
+                    messageElement.innerHTML = `
+                        <span class="chat-username">${data.username}:</span>
+                        <span class="chat-content">${data.message}</span>
+                    `;
+                    chatMessages.appendChild(messageElement);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
                     break;
             }
         } catch (error) {
