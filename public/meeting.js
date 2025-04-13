@@ -238,115 +238,86 @@ function handleMeetingJoined() {
     initializeMedia();
 }
 
-// Socket event handlers
-socket.on('participantJoined', ({ socketId, username, audioEnabled, videoEnabled }) => {
-    createPeerConnection(socketId, username);
-    updateParticipantsList();
-});
-
-socket.on('participantLeft', ({ socketId }) => {
-    if (peerConnections[socketId]) {
-        peerConnections[socketId].close();
-        delete peerConnections[socketId];
+// Handle WebRTC signaling
+function handleWebRTCSignal(data) {
+    const { type, from, meetingId, ...signal } = data;
+    
+    if (!peerConnections[from]) {
+        createPeerConnection(from);
     }
-    updateParticipantsList();
-});
-
-socket.on('offer', async ({ from, offer }) => {
-    try {
-        const peerConnection = peerConnections[from];
-        if (peerConnection) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(offer));
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-            socket.emit('answer', { to: from, answer });
-        }
-    } catch (error) {
-        console.error('Error handling offer:', error);
+    
+    const peerConnection = peerConnections[from];
+    
+    switch (type) {
+        case 'offer':
+            peerConnection.setRemoteDescription(new RTCSessionDescription(signal))
+                .then(() => peerConnection.createAnswer())
+                .then(answer => {
+                    peerConnection.setLocalDescription(answer);
+                    ws.send(JSON.stringify({
+                        type: 'answer',
+                        to: from,
+                        meetingId,
+                        ...answer
+                    }));
+                })
+                .catch(error => console.error('Error handling offer:', error));
+            break;
+            
+        case 'answer':
+            peerConnection.setRemoteDescription(new RTCSessionDescription(signal))
+                .catch(error => console.error('Error handling answer:', error));
+            break;
+            
+        case 'ice-candidate':
+            peerConnection.addIceCandidate(new RTCIceCandidate(signal))
+                .catch(error => console.error('Error handling ICE candidate:', error));
+            break;
     }
-});
-
-socket.on('answer', async ({ from, answer }) => {
-    try {
-        const peerConnection = peerConnections[from];
-        if (peerConnection) {
-            await peerConnection.setRemoteDescription(new RTCSessionDescription(answer));
-        }
-    } catch (error) {
-        console.error('Error handling answer:', error);
-    }
-});
-
-socket.on('ice-candidate', async ({ from, candidate }) => {
-    try {
-        const peerConnection = peerConnections[from];
-        if (peerConnection) {
-            await peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
-        }
-    } catch (error) {
-        console.error('Error handling ICE candidate:', error);
-    }
-});
-
-socket.on('participantsList', (participants) => {
-    participants.forEach(participant => {
-        if (participant.socketId !== socket.id) {
-            createPeerConnection(participant.socketId, participant.username);
-        }
-    });
-    updateParticipantsList();
-});
-
-socket.on('chatMessage', ({ username, message }) => {
-    const messageElement = document.createElement('div');
-    messageElement.className = 'chat-message';
-    messageElement.innerHTML = `
-        <span class="chat-username">${username}:</span>
-        <span class="chat-content">${message}</span>
-    `;
-    chatMessages.appendChild(messageElement);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
-});
+}
 
 // Create peer connection
-function createPeerConnection(socketId, username) {
-    if (!peerConnections[socketId]) {
-        const peerConnection = new RTCPeerConnection(configuration);
-        peerConnections[socketId] = peerConnection;
+function createPeerConnection(socketId) {
+    const peerConnection = new RTCPeerConnection(configuration);
+    peerConnections[socketId] = peerConnection;
 
-        // Add local stream to peer connection
-        if (localStream) {
-            localStream.getTracks().forEach(track => {
-                peerConnection.addTrack(track, localStream);
-            });
-        }
-
-        // Handle ICE candidates
-        peerConnection.onicecandidate = (event) => {
-            if (event.candidate) {
-                socket.emit('ice-candidate', { to: socketId, candidate: event.candidate });
-            }
-        };
-
-        // Handle remote stream
-        peerConnection.ontrack = (event) => {
-            const remoteVideo = document.createElement('video');
-            remoteVideo.autoplay = true;
-            remoteVideo.playsInline = true;
-            remoteVideo.srcObject = event.streams[0];
-            
-            const videoContainer = document.createElement('div');
-            videoContainer.className = 'video-container';
-            videoContainer.appendChild(remoteVideo);
-            
-            const videoLabel = document.createElement('div');
-            videoLabel.className = 'video-label';
-            videoLabel.textContent = username;
-            videoContainer.appendChild(videoLabel);
-            
-            videoGrid.appendChild(videoContainer);
-        };
+    // Add local stream to peer connection
+    if (localStream) {
+        localStream.getTracks().forEach(track => {
+            peerConnection.addTrack(track, localStream);
+        });
     }
+
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+        if (event.candidate) {
+            ws.send(JSON.stringify({
+                type: 'ice-candidate',
+                to: socketId,
+                meetingId: currentMeetingId,
+                ...event.candidate
+            }));
+        }
+    };
+
+    // Handle remote stream
+    peerConnection.ontrack = (event) => {
+        const remoteVideo = document.createElement('video');
+        remoteVideo.autoplay = true;
+        remoteVideo.playsInline = true;
+        remoteVideo.srcObject = event.streams[0];
+        
+        const videoContainer = document.createElement('div');
+        videoContainer.className = 'video-container';
+        videoContainer.appendChild(remoteVideo);
+        
+        const videoLabel = document.createElement('div');
+        videoLabel.className = 'video-label';
+        videoLabel.textContent = socketId;
+        videoContainer.appendChild(videoLabel);
+        
+        videoGrid.appendChild(videoContainer);
+    };
 }
 
 // Update participants list
@@ -356,7 +327,6 @@ function updateParticipantsList(participants) {
     // Add local participant first
     const localParticipant = document.createElement('div');
     localParticipant.className = 'participant-item';
-    localParticipant.dataset.userId = socket.id;
     localParticipant.innerHTML = `
         <span class="participant-name">${currentUsername} (You)</span>
         <div class="participant-status">
@@ -369,19 +339,16 @@ function updateParticipantsList(participants) {
     // Add remote participants
     if (Array.isArray(participants)) {
         participants.forEach(participant => {
-            if (participant.socketId !== socket.id) {
-                const participantElement = document.createElement('div');
-                participantElement.className = 'participant-item';
-                participantElement.dataset.userId = participant.socketId;
-                participantElement.innerHTML = `
-                    <span class="participant-name">${participant.username}</span>
-                    <div class="participant-status">
-                        <i class="fas fa-microphone${participant.audioEnabled ? '' : '-slash'} status-icon ${participant.audioEnabled ? 'active' : ''}"></i>
-                        <i class="fas fa-video${participant.videoEnabled ? '' : '-slash'} status-icon ${participant.videoEnabled ? 'active' : ''}"></i>
-                    </div>
-                `;
-                participantsList.appendChild(participantElement);
-            }
+            const participantElement = document.createElement('div');
+            participantElement.className = 'participant-item';
+            participantElement.innerHTML = `
+                <span class="participant-name">${participant.username}</span>
+                <div class="participant-status">
+                    <i class="fas fa-microphone${participant.audioEnabled ? '' : '-slash'} status-icon ${participant.audioEnabled ? 'active' : ''}"></i>
+                    <i class="fas fa-video${participant.videoEnabled ? '' : '-slash'} status-icon ${participant.videoEnabled ? 'active' : ''}"></i>
+                </div>
+            `;
+            participantsList.appendChild(participantElement);
         });
     }
     
@@ -395,7 +362,11 @@ audioButton.addEventListener('click', () => {
         isAudioEnabled = !isAudioEnabled;
         localStream.getAudioTracks().forEach(track => track.enabled = isAudioEnabled);
         audioButton.classList.toggle('active', isAudioEnabled);
-        socket.emit('audioStateChange', { meetingId: currentMeetingId, enabled: isAudioEnabled });
+        ws.send(JSON.stringify({
+            type: 'audioStateChange',
+            meetingId: currentMeetingId,
+            enabled: isAudioEnabled
+        }));
     }
 });
 
@@ -404,7 +375,11 @@ videoButton.addEventListener('click', () => {
         isVideoEnabled = !isVideoEnabled;
         localStream.getVideoTracks().forEach(track => track.enabled = isVideoEnabled);
         videoButton.classList.toggle('active', isVideoEnabled);
-        socket.emit('videoStateChange', { meetingId: currentMeetingId, enabled: isVideoEnabled });
+        ws.send(JSON.stringify({
+            type: 'videoStateChange',
+            meetingId: currentMeetingId,
+            enabled: isVideoEnabled
+        }));
     }
 });
 
@@ -440,8 +415,11 @@ leaveButton.addEventListener('click', () => {
         });
         peerConnections = {};
         
-        // Emit leave meeting event
-        socket.emit('leaveMeeting', { meetingId: currentMeetingId });
+        // Send leave meeting message
+        ws.send(JSON.stringify({
+            type: 'leaveMeeting',
+            meetingId: currentMeetingId
+        }));
         
         // Reset state
         currentMeetingId = null;
@@ -459,7 +437,12 @@ leaveButton.addEventListener('click', () => {
 sendButton.addEventListener('click', () => {
     const message = messageInput.value.trim();
     if (message) {
-        socket.emit('chatMessage', { meetingId: currentMeetingId, message, username: currentUsername });
+        ws.send(JSON.stringify({
+            type: 'chatMessage',
+            meetingId: currentMeetingId,
+            message,
+            username: currentUsername
+        }));
         messageInput.value = '';
     }
 });
@@ -543,7 +526,11 @@ joinButton.addEventListener('click', () => {
     if (meetingId && username) {
         currentUsername = username;
         currentMeetingId = meetingId;
-        socket.emit('joinMeeting', { meetingId, username });
+        ws.send(JSON.stringify({
+            type: 'joinMeeting',
+            meetingId,
+            username
+        }));
     } else {
         alert('Please enter both meeting ID and your name');
     }
@@ -553,7 +540,10 @@ createButton.addEventListener('click', () => {
     const username = usernameInput.value.trim();
     if (username) {
         currentUsername = username;
-        socket.emit('createMeeting', { username });
+        ws.send(JSON.stringify({
+            type: 'createMeeting',
+            username
+        }));
     } else {
         alert('Please enter your name');
     }

@@ -41,12 +41,15 @@ const wss = new WebSocket.Server({
     }
 });
 
-// Store active connections
+// Store active connections and participants
 const connections = new Map();
+const participants = new Map();
 
 // WebSocket connection handling
 wss.on('connection', (ws, req) => {
     console.log('New client connected from:', req.headers.origin);
+    let currentMeetingId = null;
+    let currentUsername = null;
 
     ws.on('message', async (message) => {
         try {
@@ -56,7 +59,12 @@ wss.on('connection', (ws, req) => {
             switch (data.type) {
                 case 'createMeeting':
                     const meetingId = generateMeetingId();
+                    currentMeetingId = meetingId;
+                    currentUsername = data.username;
+                    
                     connections.set(meetingId, new Set([ws]));
+                    participants.set(ws, { meetingId, username: currentUsername });
+                    
                     ws.send(JSON.stringify({
                         type: 'meetingCreated',
                         meetingId
@@ -66,7 +74,23 @@ wss.on('connection', (ws, req) => {
                 case 'joinMeeting':
                     const { meetingId: joinId, username } = data;
                     if (connections.has(joinId)) {
+                        currentMeetingId = joinId;
+                        currentUsername = username;
+                        
                         connections.get(joinId).add(ws);
+                        participants.set(ws, { meetingId: joinId, username });
+                        
+                        // Notify all participants in the meeting
+                        connections.get(joinId).forEach(participant => {
+                            if (participant !== ws) {
+                                participant.send(JSON.stringify({
+                                    type: 'participantJoined',
+                                    username,
+                                    meetingId: joinId
+                                }));
+                            }
+                        });
+                        
                         ws.send(JSON.stringify({
                             type: 'meetingJoined',
                             meetingId: joinId
@@ -89,6 +113,51 @@ wss.on('connection', (ws, req) => {
                         targetWs.send(JSON.stringify(data));
                     }
                     break;
+
+                case 'audioStateChange':
+                case 'videoStateChange':
+                    // Broadcast state changes to all participants
+                    connections.get(data.meetingId).forEach(participant => {
+                        if (participant !== ws) {
+                            participant.send(JSON.stringify({
+                                type: data.type,
+                                username: currentUsername,
+                                ...data
+                            }));
+                        }
+                    });
+                    break;
+
+                case 'chatMessage':
+                    // Broadcast chat messages to all participants
+                    connections.get(data.meetingId).forEach(participant => {
+                        participant.send(JSON.stringify({
+                            type: 'chatMessage',
+                            username: currentUsername,
+                            message: data.message
+                        }));
+                    });
+                    break;
+
+                case 'leaveMeeting':
+                    if (currentMeetingId && connections.has(currentMeetingId)) {
+                        connections.get(currentMeetingId).delete(ws);
+                        participants.delete(ws);
+                        
+                        // Notify remaining participants
+                        connections.get(currentMeetingId).forEach(participant => {
+                            participant.send(JSON.stringify({
+                                type: 'participantLeft',
+                                username: currentUsername
+                            }));
+                        });
+                        
+                        // Clean up empty meetings
+                        if (connections.get(currentMeetingId).size === 0) {
+                            connections.delete(currentMeetingId);
+                        }
+                    }
+                    break;
             }
         } catch (error) {
             console.error('Error handling message:', error);
@@ -101,13 +170,21 @@ wss.on('connection', (ws, req) => {
 
     ws.on('close', () => {
         console.log('Client disconnected');
-        // Clean up connections
-        for (const [meetingId, participants] of connections.entries()) {
-            if (participants.has(ws)) {
-                participants.delete(ws);
-                if (participants.size === 0) {
-                    connections.delete(meetingId);
-                }
+        if (currentMeetingId && connections.has(currentMeetingId)) {
+            connections.get(currentMeetingId).delete(ws);
+            participants.delete(ws);
+            
+            // Notify remaining participants
+            connections.get(currentMeetingId).forEach(participant => {
+                participant.send(JSON.stringify({
+                    type: 'participantLeft',
+                    username: currentUsername
+                }));
+            });
+            
+            // Clean up empty meetings
+            if (connections.get(currentMeetingId).size === 0) {
+                connections.delete(currentMeetingId);
             }
         }
     });
