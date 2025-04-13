@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self' 'unsafe-inline' 'unsafe-eval' https: http: ws: wss:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https: http:; style-src 'self' 'unsafe-inline' https: http:; img-src 'self' data: https: http:; media-src 'self' blob: https: http:; connect-src 'self' https: http: ws: wss:; font-src 'self' https: http: data:;">
+    <title>Altear - Video Meeting</title>
+    <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+<body>
+    <div class="container">
+        <div class="logo">
+            <h1>Altear</h1>
+            <p>Secure Video Meetings</p>
+        </div>
+        
+        <div class="join-container" id="joinContainer">
+            <h2>Join a Meeting</h2>
+            <div class="input-group">
+                <input type="text" id="usernameInput" placeholder="Enter Your Name">
+                <button id="createButton">Create New Meeting</button>
+            </div>
+            <div class="separator">
+                <span>OR</span>
+            </div>
+            <div class="input-group">
+                <input type="text" id="meetingIdInput" placeholder="Enter Meeting ID">
+                <input type="text" id="usernameInputJoin" placeholder="Enter Your Name">
+                <button id="joinButton">Join Meeting</button>
+            </div>
+        </div>
+
+        <div class="meeting-container" id="meetingContainer" style="display: none;">
+            <div class="meeting-header">
+                <div class="meeting-info">
+                    <h2>Meeting: <span id="meetingIdDisplay"></span> 
+                        <button id="shareMeetingButton" class="share-button">
+                            <i class="fas fa-share-alt"></i> Share
+                        </button>
+                    </h2>
+                    <p>Your name: <span id="usernameDisplay"></span></p>
+                </div>
+                <div class="participants-info">
+                    <h3>Participants (<span id="participantCount">1</span>)</h3>
+                    <div id="participantsList" class="participants-list"></div>
+                </div>
+                <button id="leaveButton" class="leave-button">
+                    <i class="fas fa-phone-slash"></i> Leave
+                </button>
+            </div>
+
+            <div class="video-grid" id="videoGrid">
+                <div class="video-container">
+                    <video id="localVideo" autoplay playsinline></video>
+                    <div class="video-label">You</div>
+                </div>
+                <div id="remoteVideos"></div>
+            </div>
+
+            <div class="controls">
+                <button id="audioButton" class="control-button" title="Toggle Audio">
+                    <i class="fas fa-microphone"></i>
+                </button>
+                <button id="videoButton" class="control-button" title="Toggle Video">
+                    <i class="fas fa-video"></i>
+                </button>
+                <button id="speechToTextButton" class="control-button" title="Toggle Speech to Text">
+                    <i class="fas fa-comment-dots"></i>
+                </button>
+                <button id="shareMeetingButton" class="control-button" title="Share Meeting">
+                    <i class="fas fa-share-alt"></i>
+                </button>
+                <button id="leaveButton" class="control-button leave" title="Leave Meeting">
+                    <i class="fas fa-phone-slash"></i>
+                </button>
+            </div>
+
+            <div class="chat-container">
+                <div class="chat-messages" id="chatMessages"></div>
+                <div class="chat-input">
+                    <input type="text" id="messageInput" placeholder="Type a message...">
+                    <button id="sendButton">
+                        <i class="fas fa-paper-plane"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="speech-text-container" id="speechTextContainer">
+                <h3>Speech Recognition</h3>
+                <div id="speechText"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="/meeting.js"></script>
+</body>
+</html>
