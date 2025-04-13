@@ -27,7 +27,8 @@ const io = socketIo(server, {
         methods: ['GET', 'POST', 'OPTIONS'],
         credentials: true,
         allowedHeaders: ['Content-Type', 'Authorization']
-    }
+    },
+    path: '/socket.io/'
 });
 
 // MongoDB Connection

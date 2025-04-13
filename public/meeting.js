@@ -1,8 +1,10 @@
 // Import Socket.IO client
 import { io } from 'socket.io-client';
 
-// Get the API URL from environment variable or use default
-const API_URL = import.meta.env.VITE_API_URL || 'https://altear-video-meeting.onrender.com';
+// Get the API URL based on environment
+const API_URL = window.location.origin.includes('vercel') 
+    ? 'https://altear-video-meeting.onrender.com'
+    : 'http://localhost:8181';
 
 // DOM Elements
 const joinContainer = document.getElementById('joinContainer');
@@ -63,7 +65,8 @@ let isVideoEnabled = true;
 let isSpeechToTextActive = false;
 let speechRecognition = null;
 
-// Socket.IO Connection
+// Socket.IO Connection with debug logging
+console.log('Connecting to Socket.IO server at:', API_URL);
 const socket = io(API_URL, {
     transports: ['websocket', 'polling'],
     reconnection: true,
@@ -74,15 +77,25 @@ const socket = io(API_URL, {
 
 // Debug connection events
 socket.on('connect', () => {
-    console.log('Connected to server');
+    console.log('Connected to server successfully');
+    console.log('Socket ID:', socket.id);
 });
 
 socket.on('connect_error', (error) => {
     console.error('Connection error:', error);
+    alert('Failed to connect to the server. Please try again later.');
 });
 
 socket.on('disconnect', (reason) => {
     console.log('Disconnected from server:', reason);
+    if (reason === 'io server disconnect') {
+        socket.connect();
+    }
+});
+
+socket.on('error', (error) => {
+    console.error('Socket error:', error);
+    alert('An error occurred. Please try again.');
 });
 
 // Initialize Speech Recognition
@@ -164,11 +177,34 @@ async function initializeMedia() {
 
 // Create a new meeting
 function createMeeting() {
+    console.log('Create meeting button clicked');
+    if (!socket.connected) {
+        console.error('Socket not connected');
+        alert('Not connected to server. Please try again.');
+        return;
+    }
+
     const username = prompt('Enter your name:');
-    if (username) {
-        console.log('Creating meeting for user:', username);
-        currentUsername = username;
-        socket.emit('createMeeting', { username });
+    if (!username) {
+        console.log('User cancelled name input');
+        return;
+    }
+
+    console.log('Creating meeting for user:', username);
+    currentUsername = username;
+    
+    try {
+        socket.emit('createMeeting', { username }, (response) => {
+            if (response && response.error) {
+                console.error('Error creating meeting:', response.error);
+                alert('Error creating meeting: ' + response.error);
+            } else {
+                console.log('Create meeting request sent');
+            }
+        });
+    } catch (error) {
+        console.error('Error emitting createMeeting:', error);
+        alert('Error creating meeting. Please try again.');
     }
 }
 
@@ -251,11 +287,6 @@ socket.on('participantsList', (participants) => {
         }
     });
     updateParticipantsList();
-});
-
-socket.on('error', ({ message }) => {
-    console.error('Server error:', message);
-    alert('Error: ' + message);
 });
 
 socket.on('chatMessage', ({ username, message }) => {
