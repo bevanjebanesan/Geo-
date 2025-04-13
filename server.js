@@ -60,8 +60,7 @@ const io = socketIo(server, {
         methods: ['GET', 'POST', 'OPTIONS'],
         credentials: true,
         allowedHeaders: ['Content-Type', 'Authorization']
-    },
-    path: '/socket.io/'
+    }
 });
 
 // Serve Socket.IO client
@@ -256,9 +255,10 @@ function generateMeetingId() {
 }
 
 // Start the server
-const PORT = process.env.PORT || 8181;
+const PORT = process.env.PORT || 10000;
 server.listen(PORT, () => {
     console.log(`Server is running on port ${PORT}`);
+    console.log(`Server URL: https://altear.onrender.com`);
 });
 
 // Handle process termination

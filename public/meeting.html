@@ -51,8 +51,16 @@
             transports: ['websocket', 'polling'],
             reconnection: true,
             reconnectionAttempts: 5,
-            reconnectionDelay: 1000,
-            path: '/socket.io/'
+            reconnectionDelay: 1000
+        });
+
+        // Debug connection
+        socket.on('connect', () => {
+            console.log('Connected to server');
+        });
+
+        socket.on('connect_error', (error) => {
+            console.error('Connection error:', error);
         });
     </script>
     <script src="meeting.js"></script>
