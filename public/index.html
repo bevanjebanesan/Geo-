@@ -35,20 +35,13 @@
         <div class="meeting-container" id="meetingContainer" style="display: none;">
             <div class="meeting-header">
                 <div class="meeting-info">
-                    <h2>Meeting: <span id="meetingIdDisplay"></span> 
-                        <button id="shareMeetingButton" class="share-button">
-                            <i class="fas fa-share-alt"></i> Share
-                        </button>
-                    </h2>
+                    <h2>Meeting: <span id="meetingIdDisplay"></span></h2>
                     <p>Your name: <span id="usernameDisplay"></span></p>
                 </div>
                 <div class="participants-info">
                     <h3>Participants (<span id="participantCount">1</span>)</h3>
                     <div id="participantsList" class="participants-list"></div>
                 </div>
-                <button id="leaveButton" class="leave-button">
-                    <i class="fas fa-phone-slash"></i> Leave
-                </button>
             </div>
 
             <div class="video-grid" id="videoGrid">
@@ -67,12 +60,12 @@
                     <i class="fas fa-video"></i>
                 </button>
                 <button id="speechToTextButton" class="control-button" title="Toggle Speech to Text">
-                    <i class="fas fa-comment-dots"></i>
+                    <i class="fas fa-closed-captioning"></i>
                 </button>
-                <button id="shareMeetingButton" class="control-button" title="Share Meeting">
+                <button id="shareMeetingButtonBottom" class="control-button" title="Share Meeting">
                     <i class="fas fa-share-alt"></i>
                 </button>
-                <button id="leaveButton" class="control-button leave" title="Leave Meeting">
+                <button id="leaveButtonBottom" class="control-button leave" title="Leave Meeting">
                     <i class="fas fa-phone-slash"></i>
                 </button>
             </div>
@@ -90,6 +83,7 @@
             <div class="speech-text-container" id="speechTextContainer">
                 <h3>Speech Recognition</h3>
                 <div id="speechText"></div>
+                <div class="speech-status" id="speechStatus"></div>
             </div>
         </div>
     </div>

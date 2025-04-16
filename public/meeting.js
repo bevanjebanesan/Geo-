@@ -6,7 +6,7 @@ const usernameInput = document.getElementById('usernameInput');
 const usernameInputJoin = document.getElementById('usernameInputJoin');
 const joinButton = document.getElementById('joinButton');
 const createButton = document.getElementById('createButton');
-const leaveButton = document.getElementById('leaveButton');
+const leaveButtonBottom = document.getElementById('leaveButtonBottom');
 const meetingIdDisplay = document.getElementById('meetingIdDisplay');
 const usernameDisplay = document.getElementById('usernameDisplay');
 const localVideo = document.getElementById('localVideo');
@@ -18,9 +18,10 @@ const chatMessages = document.getElementById('chatMessages');
 const messageInput = document.getElementById('messageInput');
 const sendButton = document.getElementById('sendButton');
 const speechText = document.getElementById('speechText');
+const speechStatus = document.getElementById('speechStatus');
 const participantsList = document.getElementById('participantsList');
 const participantCount = document.getElementById('participantCount');
-const shareMeetingButton = document.getElementById('shareMeetingButton');
+const shareMeetingButtonBottom = document.getElementById('shareMeetingButtonBottom');
 
 // WebRTC Configuration
 const configuration = {
@@ -28,6 +29,8 @@ const configuration = {
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
         { 
             urls: 'turn:numb.viagenie.ca',
             username: 'webrtc@live.com',
@@ -37,6 +40,26 @@ const configuration = {
             urls: 'turn:turn.anyfirewall.com:443?transport=tcp',
             username: 'webrtc',
             credential: 'webrtc'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:80',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:80?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
+        },
+        {
+            urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+            username: 'openrelayproject',
+            credential: 'openrelayproject'
         }
     ],
     iceCandidatePoolSize: 10,
@@ -54,104 +77,112 @@ let isAudioEnabled = true;
 let isVideoEnabled = true;
 let isSpeechToTextActive = false;
 let speechRecognition = null;
+let isListening = false;
 
 // Socket.IO Connection
-const socket = io('https://192.168.0.100:8181', {
+const socket = io(window.location.origin, {
     transports: ['polling', 'websocket'],
     reconnection: true,
-    reconnectionAttempts: 5,
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 1000,
+    reconnectionDelayMax: 5000,
     timeout: 20000,
     secure: true,
-    rejectUnauthorized: false
+    rejectUnauthorized: false,
+    path: '/socket.io'
 });
 
 // Initialize Speech Recognition
-function initializeSpeechToText() {
-    if ('webkitSpeechRecognition' in window) {
-        speechRecognition = new webkitSpeechRecognition();
-        speechRecognition.continuous = true;
-        speechRecognition.interimResults = true;
-
-        speechRecognition.onresult = (event) => {
-            let finalTranscript = '';
-            let interimTranscript = '';
-
-            for (let i = event.resultIndex; i < event.results.length; i++) {
-                const transcript = event.results[i][0].transcript;
-                if (event.results[i].isFinal) {
-                    finalTranscript += transcript;
-                } else {
-                    interimTranscript += transcript;
-                }
-            }
-
-            if (finalTranscript) {
-                const p = document.createElement('p');
-                p.textContent = finalTranscript;
-                speechText.appendChild(p);
-            }
-        };
-
-        speechRecognition.onerror = (event) => {
-            console.error('Speech recognition error:', event.error);
-            stopSpeechToText();
-        };
+function initializeSpeechRecognition() {
+    if (!('webkitSpeechRecognition' in window)) {
+        showNotification('Speech recognition is not supported in this browser', 'error');
+        return;
     }
+
+    speechRecognition = new webkitSpeechRecognition();
+    speechRecognition.continuous = true;
+    speechRecognition.interimResults = true;
+    speechRecognition.lang = 'en-US';
+
+    speechRecognition.onstart = () => {
+        console.log('Speech recognition started');
+    };
+
+    speechRecognition.onend = () => {
+        console.log('Speech recognition ended');
+        if (isListening) {
+            // Restart if it was supposed to be listening
+            try {
+                speechRecognition.start();
+            } catch (error) {
+                console.error('Error restarting speech recognition:', error);
+                isListening = false;
+                const button = document.getElementById('speechToTextButton');
+                button.classList.remove('active');
+                showNotification('Speech recognition stopped unexpectedly', 'error');
+            }
+        }
+    };
+
+    speechRecognition.onerror = (event) => {
+        console.error('Speech recognition error:', event.error);
+        isListening = false;
+        const button = document.getElementById('speechToTextButton');
+        button.classList.remove('active');
+        showNotification(`Speech recognition error: ${event.error}`, 'error');
+    };
+
+    speechRecognition.onresult = (event) => {
+        const speechText = document.getElementById('speechText');
+        let finalTranscript = '';
+        let interimTranscript = '';
+
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+                finalTranscript += transcript;
+            } else {
+                interimTranscript += transcript;
+            }
+        }
+
+        speechText.innerHTML = finalTranscript + '<span style="color: #666;">' + interimTranscript + '</span>';
+    };
 }
 
 // Toggle Speech to Text
 function toggleSpeechToText() {
+    const button = document.getElementById('speechToTextButton');
+    const container = document.querySelector('.speech-text-container');
+    
     if (!speechRecognition) {
-        initializeSpeechToText();
+        initializeSpeechRecognition();
     }
 
-    if (isSpeechToTextActive) {
-        stopSpeechToText();
-    } else {
-        startSpeechToText();
-    }
-}
-
-function startSpeechToText() {
-    if (speechRecognition) {
-        speechRecognition.start();
-        isSpeechToTextActive = true;
-        speechToTextButton.classList.add('active');
-    }
-}
-
-function stopSpeechToText() {
-    if (speechRecognition) {
+    if (isListening) {
+        // Stop listening
         speechRecognition.stop();
-        isSpeechToTextActive = false;
-        speechToTextButton.classList.remove('active');
+        isListening = false;
+        button.classList.remove('active');
+        container.classList.remove('visible');
+        showNotification('Speech-to-text stopped', 'info');
+    } else {
+        // Start listening
+        try {
+            speechRecognition.start();
+            isListening = true;
+            button.classList.add('active');
+            container.classList.add('visible');
+            showNotification('Speech-to-text started', 'success');
+        } catch (error) {
+            console.error('Error starting speech recognition:', error);
+            showNotification('Failed to start speech-to-text', 'error');
+        }
     }
 }
 
-// Button Event Listeners
-createButton.addEventListener('click', () => {
-    const username = usernameInput.value.trim();
-    if (!username) {
-        alert('Please enter your name');
-        return;
-    }
-    currentUsername = username;
-    socket.emit('createMeeting', { username });
-});
-
-joinButton.addEventListener('click', () => {
-    const meetingId = meetingIdInput.value.trim();
-    const username = usernameInputJoin.value.trim();
-    if (!meetingId || !username) {
-        alert('Please enter both meeting ID and your name');
-        return;
-    }
-    currentUsername = username;
-    socket.emit('joinMeeting', { meetingId, username });
-});
-
-leaveButton.addEventListener('click', () => {
+// Function to handle leaving the meeting
+function leaveMeeting() {
     if (currentMeetingId) {
         socket.emit('leaveMeeting', { meetingId: currentMeetingId });
     }
@@ -165,79 +196,10 @@ leaveButton.addEventListener('click', () => {
     joinContainer.style.display = 'block';
     meetingContainer.style.display = 'none';
     stopSpeechToText();
-});
-
-audioButton.addEventListener('click', () => {
-    if (localStream) {
-        isAudioEnabled = !isAudioEnabled;
-        localStream.getAudioTracks().forEach(track => track.enabled = isAudioEnabled);
-        audioButton.classList.toggle('active', isAudioEnabled);
-        socket.emit('audioStateChange', { meetingId: currentMeetingId, enabled: isAudioEnabled });
-    }
-});
-
-videoButton.addEventListener('click', () => {
-    if (localStream) {
-        isVideoEnabled = !isVideoEnabled;
-        localStream.getVideoTracks().forEach(track => track.enabled = isVideoEnabled);
-        videoButton.classList.toggle('active', isVideoEnabled);
-        socket.emit('videoStateChange', { meetingId: currentMeetingId, enabled: isVideoEnabled });
-    }
-});
-
-speechToTextButton.addEventListener('click', toggleSpeechToText);
-
-sendButton.addEventListener('click', () => {
-    const message = messageInput.value.trim();
-    if (message) {
-        socket.emit('chatMessage', { meetingId: currentMeetingId, message, username: currentUsername });
-        messageInput.value = '';
-    }
-});
-
-// Function to update participants list
-function updateParticipantsList(participants) {
-    participantsList.innerHTML = '';
-    
-    // Add local participant first
-    const localParticipant = document.createElement('div');
-    localParticipant.className = 'participant-item';
-    localParticipant.dataset.userId = socket.id;
-    localParticipant.innerHTML = `
-        <span class="participant-name">${currentUsername} (You)</span>
-        <div class="participant-status">
-            <i class="fas fa-microphone${isAudioEnabled ? '' : '-slash'} status-icon ${isAudioEnabled ? 'active' : ''}"></i>
-            <i class="fas fa-video${isVideoEnabled ? '' : '-slash'} status-icon ${isVideoEnabled ? 'active' : ''}"></i>
-        </div>
-    `;
-    participantsList.appendChild(localParticipant);
-    
-    // Add remote participants
-    if (Array.isArray(participants)) {
-        participants.forEach(participant => {
-            if (participant.userId !== socket.id) {
-                const participantElement = document.createElement('div');
-                participantElement.className = 'participant-item';
-                participantElement.dataset.userId = participant.userId;
-                participantElement.innerHTML = `
-                    <span class="participant-name">${participant.userName}</span>
-                    <div class="participant-status">
-                        <i class="fas fa-microphone${participant.audioEnabled ? '' : '-slash'} status-icon ${participant.audioEnabled ? 'active' : ''}"></i>
-                        <i class="fas fa-video${participant.videoEnabled ? '' : '-slash'} status-icon ${participant.videoEnabled ? 'active' : ''}"></i>
-                    </div>
-                `;
-                participantsList.appendChild(participantElement);
-                createPeerConnection(participant.userId);
-            }
-        });
-    }
-    
-    // Update participant count
-    participantCount.textContent = participantsList.children.length;
 }
 
-// Share meeting functionality
-shareMeetingButton.addEventListener('click', () => {
+// Function to handle sharing the meeting
+function shareMeeting() {
     const meetingUrl = `${window.location.origin}?meetingId=${currentMeetingId}`;
     
     // Create a modal dialog for the share link
@@ -283,10 +245,109 @@ shareMeetingButton.addEventListener('click', () => {
             modal.remove();
         }
     });
+}
+
+// Button Event Listeners
+createButton.addEventListener('click', () => {
+    const username = usernameInput.value.trim();
+    if (!username) {
+        alert('Please enter your name');
+        return;
+    }
+    currentUsername = username;
+    socket.emit('createMeeting', { username });
 });
 
-// Check URL parameters for meeting ID on page load
-window.addEventListener('load', () => {
+joinButton.addEventListener('click', () => {
+    const meetingId = meetingIdInput.value.trim();
+    const username = usernameInputJoin.value.trim();
+    if (!meetingId || !username) {
+        alert('Please enter both meeting ID and your name');
+        return;
+    }
+    currentUsername = username;
+    socket.emit('joinMeeting', { meetingId, username });
+});
+
+leaveButtonBottom.addEventListener('click', leaveMeeting);
+
+audioButton.addEventListener('click', () => {
+    if (localStream) {
+        isAudioEnabled = !isAudioEnabled;
+        localStream.getAudioTracks().forEach(track => track.enabled = isAudioEnabled);
+        audioButton.classList.toggle('active', isAudioEnabled);
+        socket.emit('audioStateChange', { meetingId: currentMeetingId, enabled: isAudioEnabled });
+    }
+});
+
+videoButton.addEventListener('click', () => {
+    if (localStream) {
+        isVideoEnabled = !isVideoEnabled;
+        localStream.getVideoTracks().forEach(track => track.enabled = isVideoEnabled);
+        videoButton.classList.toggle('active', isVideoEnabled);
+        socket.emit('videoStateChange', { meetingId: currentMeetingId, enabled: isVideoEnabled });
+    }
+});
+
+speechToTextButton.addEventListener('click', toggleSpeechToText);
+
+sendButton.addEventListener('click', () => {
+    const message = messageInput.value.trim();
+    if (message) {
+        socket.emit('chatMessage', { meetingId: currentMeetingId, message, username: currentUsername });
+        messageInput.value = '';
+    }
+});
+
+shareMeetingButtonBottom.addEventListener('click', shareMeeting);
+
+// Function to update participants list
+function updateParticipantsList(participants) {
+    participantsList.innerHTML = '';
+    
+    // Add local participant first
+    const localParticipant = document.createElement('div');
+    localParticipant.className = 'participant-item';
+    localParticipant.dataset.userId = socket.id;
+    localParticipant.innerHTML = `
+        <span class="participant-name">${currentUsername} (You)</span>
+        <div class="participant-status">
+            <i class="fas fa-microphone${isAudioEnabled ? '' : '-slash'} status-icon ${isAudioEnabled ? 'active' : ''}"></i>
+            <i class="fas fa-video${isVideoEnabled ? '' : '-slash'} status-icon ${isVideoEnabled ? 'active' : ''}"></i>
+        </div>
+    `;
+    participantsList.appendChild(localParticipant);
+    
+    // Add remote participants
+    if (Array.isArray(participants)) {
+        participants.forEach(participant => {
+            if (participant.userId !== socket.id) {
+                const participantElement = document.createElement('div');
+                participantElement.className = 'participant-item';
+                participantElement.dataset.userId = participant.userId;
+                participantElement.innerHTML = `
+                    <span class="participant-name">${participant.userName}</span>
+                    <div class="participant-status">
+                        <i class="fas fa-microphone${participant.audioEnabled ? '' : '-slash'} status-icon ${participant.audioEnabled ? 'active' : ''}"></i>
+                        <i class="fas fa-video${participant.videoEnabled ? '' : '-slash'} status-icon ${participant.videoEnabled ? 'active' : ''}"></i>
+                    </div>
+                `;
+                participantsList.appendChild(participantElement);
+                createPeerConnection(participant.userId);
+            }
+        });
+    }
+    
+    // Update participant count
+    participantCount.textContent = participantsList.children.length;
+}
+
+// Initialize the application
+document.addEventListener('DOMContentLoaded', () => {
+    // Initialize speech recognition
+    initializeSpeechRecognition();
+    
+    // Check URL parameters for meeting ID
     const urlParams = new URLSearchParams(window.location.search);
     const meetingId = urlParams.get('meetingId');
     if (meetingId) {
@@ -297,6 +358,14 @@ window.addEventListener('load', () => {
 // Socket.IO Event Handlers
 socket.on('connect', () => {
     console.log('Connected to server');
+});
+
+socket.on('connect_error', (error) => {
+    console.error('Connection error:', error);
+});
+
+socket.on('disconnect', (reason) => {
+    console.log('Disconnected from server:', reason);
 });
 
 socket.on('meetingCreated', ({ meetingId }) => {
@@ -501,12 +570,16 @@ socket.on('iceCandidate', async ({ candidate, from }) => {
     try {
         const pc = peerConnections[from];
         if (pc) {
-            // Only add ICE candidates if we have a remote description
-            if (pc.remoteDescription && pc.remoteDescription.type) {
+            try {
+                // Try to add the ICE candidate immediately
                 await pc.addIceCandidate(new RTCIceCandidate(candidate));
-            } else {
-                // Store the candidate for later
-                console.log('Storing ICE candidate for later');
+                console.log('Added ICE candidate successfully');
+            } catch (error) {
+                // If it fails, store it for later
+                console.log('Storing ICE candidate for later:', error.message);
+                if (!pc.iceCandidates) {
+                    pc.iceCandidates = [];
+                }
                 pc.iceCandidates.push(candidate);
             }
         }
@@ -600,7 +673,7 @@ function createPeerConnection(participantId) {
     }
 
     // Store ICE candidates until remote description is set
-    const iceCandidates = [];
+    pc.iceCandidates = [];
     
     pc.onicecandidate = (event) => {
         if (event.candidate) {
@@ -619,6 +692,7 @@ function createPeerConnection(participantId) {
             videoElement.id = `video-${participantId}`;
             videoElement.autoplay = true;
             videoElement.playsInline = true;
+            videoElement.muted = false; // Ensure audio is not muted
             
             const videoContainer = document.createElement('div');
             videoContainer.className = 'video-container';
@@ -637,14 +711,22 @@ function createPeerConnection(participantId) {
         }
         
         // Set the stream to the video element
-        videoElement.srcObject = event.streams[0];
+        if (event.streams && event.streams[0]) {
+            videoElement.srcObject = event.streams[0];
+            console.log('Set remote stream to video element');
+        } else {
+            console.warn('No streams in track event');
+        }
     };
 
     pc.oniceconnectionstatechange = () => {
         console.log(`ICE connection state for ${participantId}:`, pc.iceConnectionState);
         if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
             console.log('ICE connection failed or disconnected for:', participantId);
-            // Don't close the connection immediately, try to reconnect
+            // Try to restart ICE
+            pc.restartIce();
+            
+            // If that doesn't work, try to reconnect after a delay
             setTimeout(() => {
                 if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') {
                     console.log('Closing peer connection after timeout for:', participantId);
@@ -654,8 +736,15 @@ function createPeerConnection(participantId) {
                     if (videoElement) {
                         videoElement.parentElement.remove();
                     }
+                    
+                    // Try to recreate the connection
+                    setTimeout(() => {
+                        console.log('Attempting to recreate connection for:', participantId);
+                        createPeerConnection(participantId);
+                        createOffer(participantId);
+                    }, 1000);
                 }
-            }, 5000); // Wait 5 seconds before closing
+            }, 5000);
         }
     };
 
@@ -664,19 +753,16 @@ function createPeerConnection(participantId) {
         console.log(`Signaling state for ${participantId}:`, pc.signalingState);
         
         // If we're in the 'stable' state and have pending ICE candidates, add them now
-        if (pc.signalingState === 'stable' && iceCandidates.length > 0) {
-            console.log(`Adding ${iceCandidates.length} pending ICE candidates for ${participantId}`);
-            iceCandidates.forEach(candidate => {
+        if (pc.signalingState === 'stable' && pc.iceCandidates && pc.iceCandidates.length > 0) {
+            console.log(`Adding ${pc.iceCandidates.length} pending ICE candidates for ${participantId}`);
+            pc.iceCandidates.forEach(candidate => {
                 pc.addIceCandidate(new RTCIceCandidate(candidate))
                     .catch(err => console.error('Error adding pending ICE candidate:', err));
             });
             // Clear the queue
-            iceCandidates.length = 0;
+            pc.iceCandidates = [];
         }
     };
-
-    // Store the iceCandidates array in the peer connection object
-    pc.iceCandidates = iceCandidates;
 
     return pc;
 }
@@ -694,5 +780,13 @@ async function createOffer(participantId) {
     }
 }
 
-// Initialize the application
-initializeSpeechToText(); 
+function showNotification(message, type) {
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    document.body.appendChild(notification);
+
+    setTimeout(() => {
+        notification.remove();
+    }, 3000);
+} 

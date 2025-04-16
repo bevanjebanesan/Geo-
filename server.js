@@ -98,10 +98,25 @@ const io = socketIo(httpsServer, {
 
 // Start the server
 httpsServer.listen(8181, '0.0.0.0', async () => {
-    const localIp = '192.168.0.100';
+    const networkInterfaces = require('os').networkInterfaces();
+    let localIp = 'localhost';
+    
+    // Find the first non-internal IPv4 address
+    Object.keys(networkInterfaces).forEach((interfaceName) => {
+        networkInterfaces[interfaceName].forEach((interface) => {
+            if (interface.family === 'IPv4' && !interface.internal) {
+                localIp = interface.address;
+            }
+        });
+    });
+    
     console.log(`HTTPS Server running on port 8181`);
     console.log(`Local: https://localhost:8181`);
     console.log(`Network: https://${localIp}:8181`);
+    console.log(`\nTo join from another device on the same network:`);
+    console.log(`1. Make sure both devices are connected to the same network`);
+    console.log(`2. Open https://${localIp}:8181 in the browser`);
+    console.log(`3. Accept the security warning (this is normal for local development)`);
 });
 
 // Active meetings and participants
