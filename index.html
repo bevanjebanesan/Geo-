@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Altear Meeting</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="favicon.ico">
+  <script defer src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script defer src="script.js"></script>
+</head>
+<body>
+  <div id="toast" class="toast" hidden></div>
+  <div id="landing">
+    <h1>Altear</h1>
+    <input id="name-input" placeholder="Enter Your Name">
+    <input id="room-input" placeholder="Enter Meeting ID">
+    <button id="create-button">Create Meeting</button>
+    <button id="join-button">Join Meeting</button>
+  </div>
+  <div id="meeting" hidden>
+    <div class="navbar">
+      <span>Meeting ID: <span id="meeting-id"></span></span>
+      <button id="share-button">Share</button>
+      <button id="leave-button">Leave Meeting</button>
+      <button id="camera-toggle">Camera Off</button>
+      <button id="mic-toggle">Mute</button>
+      <button id="captions-toggle">Captions Off</button>
+      <button id="hands-toggle">Hands Off</button>
+      <div id="participants">
+        <!-- No changes needed for participant list rendering. -->
+        <strong>Participants:</strong>
+        <ul id="participants-list"></ul>
+      </div>
+    </div>
+    <div class="videos">
+      <div class="remote-container">
+        <video id="remote-video" autoplay playsinline></video>
+        <div id="remote-video-label"></div>
+        <canvas id="overlay" hidden></canvas>
+      </div>
+      <video id="local-video" autoplay muted playsinline></video>
+      <div id="local-video-label"></div>
+    </div>
+    <div id="captions" class="captions" hidden></div>
+    <div id="sign-text" class="sign-text" hidden></div>
+    <div id="suggestions" class="suggestions" hidden></div>
+    <div id="chat-container">
+      <div id="chat-messages" class="chat-messages"></div>
+      <div id="chat-input-row">
+        <input id="chat-input" type="text" placeholder="Type a message...">
+        <button id="chat-send">Send</button>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

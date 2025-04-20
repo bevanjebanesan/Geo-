@@ -1,0 +1,831 @@
+// Reverted to last known working version for hand tracking and suggestions.
+
+(() => {
+  const landing = document.getElementById('landing');
+  const meeting = document.getElementById('meeting');
+  const roomInput = document.getElementById('room-input');
+  const createBtn = document.getElementById('create-button');
+  const joinBtn = document.getElementById('join-button');
+  const meetingIdSpan = document.getElementById('meeting-id');
+  const shareBtn = document.getElementById('share-button');
+  const cameraToggle = document.getElementById('camera-toggle');
+  const micToggle = document.getElementById('mic-toggle');
+  const captionsToggle = document.getElementById('captions-toggle');
+  const handsToggle = document.getElementById('hands-toggle');
+  const participantsList = document.getElementById('participants-list');
+  const localVideo = document.getElementById('local-video');
+  const remoteVideo = document.getElementById('remote-video');
+  const overlay = document.getElementById('overlay');
+  const overlayCtx = overlay.getContext('2d');
+  const captionsDiv = document.getElementById('captions');
+  const signTextDiv = document.getElementById('sign-text');
+  const suggestionsDiv = document.getElementById('suggestions');
+  const nameInput = document.getElementById('name-input');
+  const toastEl = document.getElementById('toast');
+  const chatInput = document.getElementById('chat-input');
+  const chatSend = document.getElementById('chat-send');
+  const chatMessages = document.getElementById('chat-messages');
+  const leaveBtn = document.getElementById('leave-button');
+
+  let peer, localStream, currentCall;
+  const participants = new Set();
+  let dataConnections = [];
+
+  let cameraOn = true, micOn = true, captionsOn = false, handsOn = false;
+  let recognition, lastSign = '', prefixSign = '';
+  let userName = '';
+
+  let letterBuffer = '';
+  let sentenceBuffer = '';
+  let suggestionOwner = userName;
+  let lastDetectedLetter = '';
+  let lastLetterTimeout = null;
+
+  // --- Map peer IDs to user names ---
+  const peerIdToName = {};
+
+  // Show loading for suggestions if dictionary is not ready
+  function showSuggestionsLoading() {
+    suggestionsDiv.innerHTML = '<span style="color:#888">Loading dictionary...</span>';
+    suggestionsDiv.hidden = false;
+  }
+
+  // Add backspace button for letter buffer
+  function addBackspaceButton() {
+    let backspaceBtn = document.getElementById('backspace-letter');
+    if (!backspaceBtn) {
+      backspaceBtn = document.createElement('button');
+      backspaceBtn.id = 'backspace-letter';
+      backspaceBtn.textContent = '⌫';
+      backspaceBtn.style = 'margin-left:8px;';
+      suggestionsDiv.parentNode.insertBefore(backspaceBtn, suggestionsDiv);
+    }
+    backspaceBtn.onclick = () => {
+      letterBuffer = letterBuffer.slice(0, -1);
+      updateSuggestionsUI();
+      broadcastSuggestions();
+    };
+  }
+
+  suggestionsDiv.onclick = e => {
+    if (e.target.tagName === 'SPAN' && e.target.dataset.word) {
+      // When a suggestion is clicked, add it to the sentence buffer and clear the letter buffer
+      sentenceBuffer += (sentenceBuffer ? ' ' : '') + e.target.dataset.word;
+      letterBuffer = '';
+      updateSuggestionsUI();
+      broadcastSuggestions();
+    }
+  };
+
+  // --- Helper: get only real words from trie for prefix ---
+  function getRealWordSuggestions(prefix, max=5) {
+    let node = trie.root;
+    prefix = prefix.toLowerCase();
+    for (const char of prefix) {
+      if (!node.children[char]) return [];
+      node = node.children[char];
+    }
+    const results = [];
+    (function dfs(curr, path) {
+      if (results.length >= max) return;
+      const word = prefix + path;
+      // Only accept real words: at least 2 chars, all lowercase a-z
+      if (curr.isEnd && /^[a-z]{2,}$/.test(word)) results.push(word);
+      for (const c in curr.children) dfs(curr.children[c], path + c);
+    })(node, '');
+    return results;
+  }
+
+  // --- updateSuggestionsUI: only show real words, persist while buffer is valid ---
+  function updateSuggestionsUI(suggestions, owner, sentence) {
+    if (!dictLoaded) {
+      showSuggestionsLoading();
+      return;
+    }
+    // Only show suggestions if buffer is non-empty, alphabetic, and matches a prefix in trie
+    if (!letterBuffer.match(/^[a-z]+$/i) || getRealWordSuggestions(letterBuffer).length === 0) {
+      suggestionsDiv.innerHTML = `<span style='color:#888'>No suggestions</span>`;
+      suggestionsDiv.hidden = false;
+      let sentenceEl = document.getElementById('sentence-buffer');
+      if (sentenceEl) sentenceEl.innerHTML = `<b>Sentence (${owner || suggestionOwner}):</b> ${sentenceBuffer || ''} <button id=\"clear-sentence\" style=\"margin-left:8px;\">Clear</button>`;
+      return;
+    }
+    suggestions = suggestions || getRealWordSuggestions(letterBuffer, 5);
+    owner = owner || suggestionOwner;
+    sentence = sentence !== undefined ? sentence : sentenceBuffer;
+    if (suggestions.length > 0) {
+      suggestionsDiv.innerHTML = `<b>Suggestions (${owner}):</b> ` +
+        suggestions.map(w => `<span data-word=\"${w}\" style=\"cursor:pointer;color:#0077cc;margin-right:8px;\">${w}</span>`).join(' ');
+      suggestionsDiv.hidden = false;
+    } else {
+      suggestionsDiv.innerHTML = `<span style='color:#888'>No suggestions</span>`;
+      suggestionsDiv.hidden = false;
+    }
+    addBackspaceButton();
+    // Show sentence buffer below suggestions
+    let sentenceEl = document.getElementById('sentence-buffer');
+    if (!sentenceEl) {
+      sentenceEl = document.createElement('div');
+      sentenceEl.id = 'sentence-buffer';
+      sentenceEl.style = 'margin-top:6px;padding:6px 8px;background:#f1f1f1;border-radius:4px;min-height:24px;';
+      suggestionsDiv.parentNode.insertBefore(sentenceEl, suggestionsDiv.nextSibling);
+    }
+    sentenceEl.innerHTML = `<b>Sentence (${owner}):</b> ${sentence || ''} <button id=\"clear-sentence\" style=\"margin-left:8px;\">Clear</button>`;
+    document.getElementById('clear-sentence').onclick = () => {
+      sentenceBuffer = '';
+      updateSuggestionsUI();
+      broadcastSuggestions();
+    };
+  }
+
+  // --- Visual buffer indicator ---
+  function updateBufferIndicator() {
+    let bufferEl = document.getElementById('letter-buffer-indicator');
+    if (!bufferEl) {
+      bufferEl = document.createElement('div');
+      bufferEl.id = 'letter-buffer-indicator';
+      bufferEl.style = 'margin: 6px 0; color: #444; font-size: 1.1em; text-align:center;';
+      suggestionsDiv.parentNode.insertBefore(bufferEl, suggestionsDiv);
+    }
+    bufferEl.innerHTML = `<b>Current Buffer:</b> <span style='color:#0077cc'>${letterBuffer || '(empty)'}</span>`;
+  }
+
+  // Patch updateSuggestionsUI to update buffer indicator
+  const _updateSuggestionsUI = updateSuggestionsUI;
+  updateSuggestionsUI = function(...args) {
+    updateBufferIndicator();
+    return _updateSuggestionsUI.apply(this, args);
+  };
+
+  function broadcastSuggestions() {
+    if (!dictLoaded) return;
+    const suggestions = getRealWordSuggestions(letterBuffer, 5);
+    for (const conn of dataConnections) {
+      if (conn.open) conn.send({type:'suggestions', name:userName, suggestions, sentence: sentenceBuffer});
+    }
+    updateSuggestionsUI(suggestions, userName, sentenceBuffer);
+  }
+
+  createBtn.onclick = () => {
+    if (!nameInput.value.trim()) return alert('Enter your name');
+    userName = nameInput.value.trim();
+    roomInput.value = roomInput.value || uuidv4();
+    startMeeting(roomInput.value, true);
+  };
+  joinBtn.onclick = () => {
+    if (!nameInput.value.trim()) return alert('Enter your name');
+    if (!roomInput.value) return alert('Enter Meeting ID');
+    userName = nameInput.value.trim();
+    startMeeting(roomInput.value, false);
+  };
+
+  async function startMeeting(roomId, isCreator) {
+    landing.hidden = true; meeting.hidden = false;
+    meetingIdSpan.textContent = roomId;
+    participants.clear();
+    if (isCreator) participants.add(userName);
+    updateParticipants();
+    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    localVideo.srcObject = localStream;
+    initPeer(roomId, isCreator);
+    setupControls();
+  }
+
+  function initPeer(roomId, isCreator) {
+    peer = isCreator ? new Peer(roomId) : new Peer();
+    peer.on('open', id => {
+      if (!isCreator) callPeer(roomId);
+      participants.add(userName);
+      updateParticipants();
+    });
+    peer.on('call', call => {
+      call.answer(localStream);
+      handleCall(call);
+    });
+    peer.on('connection', conn => {
+      dataConnections.push(conn);
+      conn.on('data', handleData);
+      conn.send({type:'name', name:userName, peerId:peer.id});
+    });
+  }
+
+  function callPeer(peerId) {
+    const call = peer.call(peerId, localStream);
+    handleCall(call);
+    const conn = peer.connect(peerId);
+    dataConnections.push(conn);
+    conn.on('data', handleData);
+    conn.on('open', () => {
+      conn.send({type:'name', name:userName, peerId:peer.id});
+    });
+  }
+
+  function handleData(data) {
+    if (data.type === 'name' && data.name && data.peerId) {
+      peerIdToName[data.peerId] = data.name;
+      participants.add(data.name);
+      updateParticipants();
+      updateVideoLabels();
+      return;
+    }
+    if (data.type === 'caption') {
+      showRemoteCaption(data.name, data.text);
+    }
+    if (data.type === 'chat') {
+      appendChatMessage(data.name, data.text, false);
+    }
+    if (data.type === 'suggestions') {
+      suggestionOwner = data.name;
+      updateSuggestionsUI(data.suggestions, data.name, data.sentence);
+    }
+    if (data.type === 'participants') {
+      participants.clear();
+      for (const name of data.participants) participants.add(name);
+      updateParticipants();
+    }
+    if (data.type === 'request_participants' && peer && peer.id === currentCall.peer) {
+      broadcastParticipants();
+    }
+  }
+
+  function handleCall(call) {
+    participants.add(call.peer);
+    updateParticipants();
+    call.on('stream', stream => {
+      remoteVideo.srcObject = stream;
+      overlay.width = remoteVideo.videoWidth;
+      overlay.height = remoteVideo.videoHeight;
+    });
+    call.on('close', () => { participants.delete(call.peer); updateParticipants(); });
+    currentCall = call;
+  }
+
+  // --- updateParticipants: only show names, never peer IDs ---
+  function updateParticipants() {
+    participantsList.innerHTML = '';
+    participants.forEach(name => {
+      // Only show if not a peer ID (IDs are long and alphanumeric, names are from user input)
+      if (typeof name === 'string' && name.length <= 30 && /[a-zA-Z]/.test(name)) {
+        const li = document.createElement('li');
+        li.textContent = name;
+        participantsList.appendChild(li);
+      }
+    });
+    broadcastParticipants();
+  }
+
+  function broadcastParticipants() {
+    for (const conn of dataConnections) {
+      if (conn.open) conn.send({type:'participants', participants: Array.from(participants)});
+    }
+  }
+
+  shareBtn.onclick = () => {
+    navigator.clipboard.writeText(meetingIdSpan.textContent)
+      .then(() => showToast('Meeting ID copied'))
+      .catch(err => console.error('Share error', err));
+  };
+
+  cameraToggle.onclick = () => {
+    cameraOn = !cameraOn;
+    localStream.getVideoTracks()[0].enabled = cameraOn;
+    cameraToggle.textContent = cameraOn ? 'Camera Off' : 'Camera On';
+  };
+  micToggle.onclick = () => {
+    micOn = !micOn;
+    localStream.getAudioTracks()[0].enabled = micOn;
+    micToggle.textContent = micOn ? 'Mute' : 'Unmute';
+  };
+
+  captionsToggle.onclick = () => {
+    captionsOn = !captionsOn;
+    captionsToggle.textContent = captionsOn ? 'Captions On' : 'Captions Off';
+    if (captionsOn) startSpeech(); else stopSpeech();
+  };
+
+  handsToggle.onclick = () => {
+    handsOn = !handsOn;
+    handsToggle.textContent = handsOn ? 'Hands On' : 'Hands Off';
+    overlay.hidden = !handsOn;
+    signTextDiv.hidden = !handsOn;
+    suggestionsDiv.hidden = !handsOn;
+    console.log('Hands button clicked, handsOn:', handsOn);
+    ensureHandTrackingActive();
+  };
+
+  function setupControls() {
+    cameraToggle.textContent = 'Camera Off';
+    micToggle.textContent = 'Mute';
+    captionsToggle.textContent = 'Captions Off';
+    handsToggle.textContent = 'Hands Off';
+    captionsDiv.hidden = true;
+    signTextDiv.hidden = true;
+    suggestionsDiv.hidden = true;
+  }
+
+  function startSpeech() {
+    const S = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!S) return alert('SpeechRecognition not supported');
+    recognition = new S();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    recognition.lang = 'en-US';
+    recognition.onresult = e => {
+      let t = '';
+      for (const r of e.results) t += r[0].transcript;
+      captionsDiv.textContent = t;
+      captionsDiv.hidden = false;
+      // Broadcast to peers
+      for (const conn of dataConnections) {
+        if (conn.open) conn.send({type:'caption', name:userName, text:t});
+      }
+    };
+    recognition.onerror = err => console.error(err);
+    recognition.start();
+  }
+  function stopSpeech() { if (recognition) recognition.stop(); captionsDiv.hidden = true; }
+
+  function showRemoteCaption(name, text) {
+    captionsDiv.hidden = false;
+    captionsDiv.innerHTML = `<b>${name}:</b> ${text}`;
+  }
+
+  chatSend.onclick = sendChatMessage;
+  chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChatMessage(); });
+
+  function sendChatMessage() {
+    const msg = chatInput.value.trim();
+    if (!msg) return;
+    appendChatMessage(userName, msg, true);
+    for (const conn of dataConnections) {
+      if (conn.open) conn.send({type:'chat', name:userName, text:msg});
+    }
+    chatInput.value = '';
+  }
+
+  function appendChatMessage(sender, text, local) {
+    const div = document.createElement('div');
+    div.innerHTML = `<b>${sender}:</b> ${text}`;
+    div.style.textAlign = local ? 'right' : 'left';
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  function requestVideoFrame() {
+    if (!handsOn) return;
+    setTimeout(() => {
+      try {
+        localVideo.requestVideoFrameCallback(async () => {
+          if (!handsOn) return;
+          await hands.send({ image: localVideo });
+          requestVideoFrame();
+        });
+      } catch (e) {
+        // Retry after short delay if error
+        setTimeout(requestVideoFrame, 100);
+      }
+    }, 50);
+  }
+
+  function ensureHandTrackingActive() {
+    if (handsOn && localVideo.readyState >= 2) {
+      requestVideoFrame();
+    } else if (handsOn) {
+      localVideo.onloadeddata = () => requestVideoFrame();
+    }
+  }
+
+  // Sign detection via MediaPipe
+  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.3 });
+  hands.onResults(onHandsResults);
+
+  let buffer = '';
+  let dictLoaded = false;
+  const trie = new (function() {
+    this.root = { children: {}, isEnd: false };
+    this.insert = function(word) {
+      let node = this.root;
+      for (const char of word) {
+        if (!node.children[char]) node.children[char] = { children: {}, isEnd: false };
+        node = node.children[char];
+      }
+      node.isEnd = true;
+    };
+    this.getWordsWithPrefix = function(prefix) {
+      let node = this.root;
+      for (const char of prefix) {
+        if (!node.children[char]) return [];
+        node = node.children[char];
+      }
+      const results = [];
+      (function dfs(curr, path) {
+        if (curr.isEnd) results.push(prefix + path);
+        for (const c in curr.children) dfs(curr.children[c], path + c);
+      })(node, '');
+      return results;
+    };
+  })();
+  // --- Load workplace-specific dictionary ---
+  (async () => {
+    const res = await fetch('workplace_words.txt');
+    const words = (await res.text()).split('\n').map(w => w.trim()).filter(w => w);
+    for (const w of words) trie.insert(w.toLowerCase());
+    dictLoaded = true;
+  })();
+
+  function distance3d(x1, y1, z1, x2, y2, z2) {
+    return Math.sqrt(
+      Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2) + Math.pow(z2 - z1, 2)
+    );
+  }
+  function angle(l1, l2, l3) {
+    const v1 = [l2.x - l1.x, l2.y - l1.y, l2.z - l1.z];
+    const v2 = [l3.x - l2.x, l3.y - l2.y, l3.z - l2.z];
+    const dotproduct = v1.reduce((a, b, i) => a + b * v2[i], 0);
+    const v1_mag = Math.hypot(v1[0], v1[1], v1[2]);
+    const v2_mag = Math.hypot(v2[0], v2[1], v2[2]);
+    const rad = Math.acos(dotproduct / (v1_mag * v2_mag));
+    return (rad * 180) / Math.PI;
+  }
+  function letter(thumb, index, middle, ring, pinky, tip_dist) {
+    if (index > 50 && middle > 50 && ring > 50 && pinky > 50) {
+      if (middle <= 170 && ring <= 170) {
+        if (thumb > 80) {
+          return "C";
+        } else {
+          return "O";
+        }
+      }
+      if (thumb > 80) {
+        return "E";
+      } else if (thumb > 20 && thumb <= 80) {
+        return "T";
+      } else {
+        return "A";
+      }
+    }
+    if (middle > 50 && ring > 50 && pinky > 50) {
+      if (thumb > 70) {
+        return "D";
+      } else {
+        return "L";
+      }
+    }
+    if (index > 50 && middle > 50 && ring > 50) {
+      if (thumb > 70) {
+        return "I";
+      } else {
+        return "Y";
+      }
+    }
+    if (ring > 50 && pinky > 50) {
+      if (thumb > 70) {
+        if (tip_dist > 0.2) {
+          return "V";
+        } else {
+          return "U";
+        }
+      } else {
+        if (tip_dist > 0.2) {
+          return "K";
+        } else {
+          return "H";
+        }
+      }
+    }
+    if (middle > 70 && ring > 70) {
+      if (thumb < 20) {
+        return "i<3u";
+      }
+    }
+    if (pinky > 50) {
+      if (thumb > 20) {
+        return "W";
+      }
+    }
+    if (index > 50) {
+      if (thumb > 20) {
+        return "F";
+      }
+    }
+    if (thumb > 40) {
+      return "B";
+    }
+    if (thumb > 15) {
+      return "Hi";
+    }
+    return "NA";
+  }
+
+  // --- Improved onHandsResults: buffer holds only current letter until new is shown ---
+  function onHandsResults(results) {
+    try {
+      overlayCtx.save();
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+      if (results && results.image && overlay.width && overlay.height)
+        overlayCtx.drawImage(results.image, 0, 0, overlay.width, overlay.height);
+      if (handsOn && results.multiHandLandmarks && results.multiHandLandmarks[0]) {
+        const landmarks = results.multiHandLandmarks[0];
+        let finger = {
+          thumb: { angle_sum: 0 },
+          index: { angle_sum: 0 },
+          middle: { angle_sum: 0 },
+          ring: { angle_sum: 0 },
+          pinky: { angle_sum: 0 }
+        };
+        const L = landmarks;
+        for (let i = 0; i < L.length; i++) {
+          L[i].x -= L[0].x;
+          L[i].y -= L[0].y;
+          L[i].z -= L[0].z;
+        }
+        finger.thumb.angle_sum = angle(L[1], L[2], L[3]) + angle(L[2], L[3], L[4]);
+        finger.index.angle_sum = angle(L[5], L[6], L[7]) + angle(L[6], L[7], L[8]);
+        finger.middle.angle_sum = angle(L[9], L[10], L[11]) + angle(L[10], L[11], L[12]);
+        finger.ring.angle_sum = angle(L[13], L[14], L[15]) + angle(L[14], L[15], L[16]);
+        finger.pinky.angle_sum = angle(L[17], L[18], L[19]) + angle(L[18], L[19], L[20]);
+        let index_middle_tip_dist = distance3d(
+          L[8].x, L[8].y, L[8].z,
+          L[12].x, L[12].y, L[12].z
+        );
+        let predicted_letter = letter(
+          finger.thumb.angle_sum,
+          finger.index.angle_sum,
+          finger.middle.angle_sum,
+          finger.ring.angle_sum,
+          finger.pinky.angle_sum,
+          index_middle_tip_dist
+        );
+        signTextDiv.textContent = predicted_letter;
+        signTextDiv.hidden = false;
+        // --- Only update buffer if new letter is shown ---
+        if (dictLoaded && /^[A-Za-z]$/.test(predicted_letter)) {
+          if (predicted_letter !== lastDetectedLetter) {
+            // Replace last letter in buffer with new letter
+            if (letterBuffer.length === 0) {
+              letterBuffer = predicted_letter.toLowerCase();
+            } else {
+              letterBuffer = letterBuffer.slice(0, -1) + predicted_letter.toLowerCase();
+            }
+            lastDetectedLetter = predicted_letter;
+            updateSuggestionsUI();
+            broadcastSuggestions();
+            if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
+            lastLetterTimeout = setTimeout(() => { lastDetectedLetter = ''; }, 1000);
+          } else {
+            // Keep buffer at current state (do not add more letters)
+            updateSuggestionsUI();
+          }
+        } else if (!/^[A-Za-z]$/.test(predicted_letter)) {
+          lastDetectedLetter = '';
+          if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
+          lastLetterTimeout = setTimeout(() => {
+            letterBuffer = '';
+            updateSuggestionsUI();
+            broadcastSuggestions();
+            suggestionsDiv.hidden = true;
+          }, 1000);
+        }
+      } else {
+        signTextDiv.hidden = true;
+        if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
+        lastLetterTimeout = setTimeout(() => {
+          letterBuffer = '';
+          updateSuggestionsUI();
+          broadcastSuggestions();
+          suggestionsDiv.hidden = true;
+        }, 1000);
+      }
+      overlayCtx.restore();
+    } catch (e) {
+      // Ignore handtracking errors
+    }
+  };
+
+  // Patch startMeeting to ensure hand tracking is started if handsOn
+  const _startMeeting2 = startMeeting;
+  startMeeting = async function(roomId, isCreator) {
+    await _startMeeting2(roomId, isCreator);
+    ensureHandTrackingActive();
+  };
+
+  // --- Robust camera failure handling ---
+  async function ensureCameraWorks() {
+    try {
+      if (!localStream || localStream.getVideoTracks().every(t => t.readyState !== 'live')) {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+        localVideo.srcObject = localStream;
+        showToast('Camera reconnected');
+      }
+    } catch (e) {
+      showToast('Camera error: ' + (e.message || e));
+      overlay.hidden = true;
+      signTextDiv.hidden = true;
+      suggestionsDiv.hidden = true;
+    }
+  }
+  localVideo.onended = ensureCameraWorks;
+  if (localStream) {
+    localStream.getVideoTracks().forEach(track => {
+      track.onended = ensureCameraWorks;
+      track.oninactive = ensureCameraWorks;
+    });
+  }
+
+  // Patch startMeeting to always check camera
+  const _startMeeting3 = startMeeting;
+  startMeeting = async function(roomId, isCreator) {
+    await _startMeeting3(roomId, isCreator);
+    await ensureCameraWorks();
+    ensureHandTrackingActive();
+  };
+
+  // --- Fix updateVideoLabels to use user names ---
+  function updateVideoLabels() {
+    let localLabel = document.getElementById('local-video-label');
+    if (!localLabel) {
+      localLabel = document.createElement('div');
+      localLabel.id = 'local-video-label';
+      localLabel.style = 'text-align:center;font-size:1em;color:#444;margin-top:4px;';
+      localVideo.parentNode.appendChild(localLabel);
+    }
+    localLabel.textContent = userName || 'You';
+    let remoteLabel = document.getElementById('remote-video-label');
+    if (!remoteLabel) {
+      remoteLabel = document.createElement('div');
+      remoteLabel.id = 'remote-video-label';
+      remoteLabel.style = 'text-align:center;font-size:1em;color:#444;margin-top:4px;';
+      remoteVideo.parentNode.appendChild(remoteLabel);
+    }
+    // Find the remote participant's peerId and map to name
+    let remotePeerId = null;
+    if (currentCall && currentCall.peer && peerIdToName[currentCall.peer]) {
+      remoteLabel.textContent = peerIdToName[currentCall.peer];
+    } else {
+      // fallback: try to find any participant that's not me
+      let others = Array.from(participants).filter(n => n !== userName);
+      remoteLabel.textContent = others[0] || 'Remote';
+    }
+  }
+
+  // Patch updateParticipants to also update video labels
+  const _updateParticipants2 = updateParticipants;
+  updateParticipants = function() {
+    _updateParticipants2();
+    updateVideoLabels();
+  };
+
+  // Also update video labels after joining/starting meeting
+  const _startMeeting = startMeeting;
+  startMeeting = async function(roomId, isCreator) {
+    await _startMeeting(roomId, isCreator);
+    updateVideoLabels();
+  };
+
+  // Call requestParticipantsFromHost after joining
+  const _handleCall = handleCall;
+  handleCall = function(call) {
+    _handleCall(call);
+    requestParticipantsFromHost();
+  };
+
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.hidden = false;
+    setTimeout(() => { toastEl.hidden = true; }, 2000);
+  }
+
+  leaveBtn.onclick = leaveMeeting;
+
+  function leaveMeeting() {
+    // Close PeerJS connections
+    if (peer) {
+      peer.destroy();
+      peer = null;
+    }
+    // Stop local media stream
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+      localStream = null;
+    }
+    // Clear remote video
+    if (remoteVideo.srcObject) remoteVideo.srcObject = null;
+    if (localVideo.srcObject) localVideo.srcObject = null;
+    // Hide meeting, show landing
+    meeting.hidden = true;
+    landing.hidden = false;
+    // Clear participants, chat, captions
+    participants.clear();
+    updateParticipants();
+    chatMessages.innerHTML = '';
+    captionsDiv.hidden = true;
+    signTextDiv.hidden = true;
+    suggestionsDiv.hidden = true;
+    overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+    overlay.hidden = true;
+    // Reset toggles
+    handsOn = false;
+    handsToggle.textContent = 'Hands Off';
+    overlay.hidden = true;
+    signTextDiv.hidden = true;
+    suggestionsDiv.hidden = true;
+    // Optionally: reset other state variables if needed
+  }
+
+  // --- Keyboard navigation for suggestions (arrow keys + enter) ---
+  let suggestionIndex = 0;
+  let lastSuggestions = [];
+
+  function highlightSuggestion(index) {
+    const spans = suggestionsDiv.querySelectorAll('span[data-word]');
+    spans.forEach((el, i) => {
+      el.style.background = i === index ? '#e3f1ff' : '';
+      el.style.borderRadius = i === index ? '4px' : '';
+      el.style.padding = i === index ? '2px 4px' : '';
+    });
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (!handsOn || suggestionsDiv.hidden || lastSuggestions.length === 0) return;
+    if (["ArrowLeft","ArrowUp"].includes(e.key)) {
+      e.preventDefault();
+      suggestionIndex = (suggestionIndex - 1 + lastSuggestions.length) % lastSuggestions.length;
+      highlightSuggestion(suggestionIndex);
+    } else if (["ArrowRight","ArrowDown"].includes(e.key)) {
+      e.preventDefault();
+      suggestionIndex = (suggestionIndex + 1) % lastSuggestions.length;
+      highlightSuggestion(suggestionIndex);
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (lastSuggestions[suggestionIndex]) {
+        sentenceBuffer += (sentenceBuffer ? ' ' : '') + lastSuggestions[suggestionIndex];
+        letterBuffer = '';
+        updateSuggestionsUI();
+        broadcastSuggestions();
+        suggestionIndex = 0;
+        lastSuggestions = [];
+      }
+    }
+  });
+
+  // Patch updateSuggestionsUI to support keyboard navigation
+  const _updateSuggestionsUI2 = updateSuggestionsUI;
+  updateSuggestionsUI = function(suggestions, ...args) {
+    if (!Array.isArray(suggestions)) suggestions = getRealWordSuggestions(letterBuffer, 5);
+    lastSuggestions = suggestions;
+    if (suggestionIndex >= suggestions.length) suggestionIndex = 0;
+    setTimeout(() => highlightSuggestion(suggestionIndex), 0);
+    return _updateSuggestionsUI2.call(this, suggestions, ...args);
+  };
+
+  // --- Participant Sync: Broadcast full participant list on join/leave ---
+  function broadcastParticipants() {
+    for (const conn of dataConnections) {
+      if (conn.open) conn.send({type:'participants', participants: Array.from(participants)});
+    }
+  }
+
+  // Patch handleData to handle participants sync
+  const _handleData = handleData;
+  handleData = function(data) {
+    if (data.type === 'participants') {
+      participants.clear();
+      for (const name of data.participants) participants.add(name);
+      updateParticipants();
+      return;
+    }
+    _handleData.call(this, data);
+  };
+
+  // When joining, request full participant list from host
+  function requestParticipantsFromHost() {
+    if (dataConnections.length > 0 && dataConnections[0].open) {
+      dataConnections[0].send({type:'request_participants'});
+    }
+  }
+
+  // Host responds to participant list requests
+  const _handleData2 = handleData;
+  handleData = function(data) {
+    if (data.type === 'request_participants' && peer && peer.id === currentCall.peer) {
+      broadcastParticipants();
+      return;
+    }
+    _handleData2.call(this, data);
+  };
+
+  // Call broadcastParticipants on join/leave
+  const _updateParticipants = updateParticipants;
+  updateParticipants = function() {
+    _updateParticipants();
+    broadcastParticipants();
+  };
+
+})();
+
+function uuidv4() {
+  return ([1e7] + -1e3 + -4e3 + -8e3 + -1e11).replace(/[018]/g, c =>
+    (c ^ crypto.getRandomValues(new Uint8Array(1))[0] & (15 >> (c / 4))).toString(16)
+  );
+}
