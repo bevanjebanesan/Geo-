@@ -1,0 +1,16 @@
+# Node modules and Python cache
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# SSL certs and local keys
+*.pem
+
+# Deployment
+.netlify/
+
+# OS files
+.DS_Store
+Thumbs.db

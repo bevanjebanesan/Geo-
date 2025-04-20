@@ -15,6 +15,7 @@
 </head>
 <body>
   <div id="toast" class="toast" hidden></div>
+  <div id="ip-link-container" style="margin: 1em auto; text-align: center;"></div>
   <div id="landing">
     <h1>Altear</h1>
     <input id="name-input" placeholder="Enter Your Name">
@@ -32,7 +33,6 @@
       <button id="captions-toggle">Captions Off</button>
       <button id="hands-toggle">Hands Off</button>
       <div id="participants">
-        <!-- No changes needed for participant list rendering. -->
         <strong>Participants:</strong>
         <ul id="participants-list"></ul>
       </div>
@@ -49,6 +49,7 @@
     <div id="captions" class="captions" hidden></div>
     <div id="sign-text" class="sign-text" hidden></div>
     <div id="suggestions" class="suggestions" hidden></div>
+    <!-- Remote hand sentence output will be injected dynamically -->
     <div id="chat-container">
       <div id="chat-messages" class="chat-messages"></div>
       <div id="chat-input-row">
@@ -57,5 +58,33 @@
       </div>
     </div>
   </div>
+  <script>
+    // --- Pre-fill meeting ID from URL param if present ---
+    (function() {
+      const url = new URL(window.location.href);
+      const room = url.searchParams.get('room');
+      if (room) {
+        const roomInput = document.getElementById('room-input');
+        if (roomInput) roomInput.value = room;
+      }
+    })();
+
+    // --- Display LAN IP link for easy access ---
+    (async function() {
+      // Try to fetch the LAN IP from a special endpoint or fallback to placeholder
+      let ip = '192.168.0.100'; // fallback
+      try {
+        // Try to get the IP from the server (if you add a /ip endpoint), else fallback
+        // You can also update this script to fetch the IP dynamically if you have a backend
+      } catch (e) {}
+      const port = window.location.port || '8000';
+      const room = document.getElementById('room-input')?.value || '';
+      const ipUrl = `http://${ip}:${port}${room ? `/?room=${encodeURIComponent(room)}` : ''}`;
+      const container = document.getElementById('ip-link-container');
+      if (container) {
+        container.innerHTML = `<b>LAN Meeting Link:</b> <a href='${ipUrl}' target='_blank'>${ipUrl}</a><br><span style='color:#888;font-size:0.95em'>(Open this link on your phone or other devices on the same WiFi)</span>`;
+      }
+    })();
+  </script>
 </body>
 </html>

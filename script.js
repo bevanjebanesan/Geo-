@@ -44,6 +44,41 @@
   // --- Map peer IDs to user names ---
   const peerIdToName = {};
 
+  // --- Dictionary loading state for suggestions ---
+  let dictLoaded = false;
+
+  // --- Trie and dictionary loader (workplace_words.txt) ---
+  const trie = new (function() {
+    this.root = { children: {}, isEnd: false };
+    this.insert = function(word) {
+      let node = this.root;
+      for (const char of word) {
+        if (!node.children[char]) node.children[char] = { children: {}, isEnd: false };
+        node = node.children[char];
+      }
+      node.isEnd = true;
+    };
+    this.getWordsWithPrefix = function(prefix) {
+      let node = this.root;
+      for (const char of prefix) {
+        if (!node.children[char]) return [];
+        node = node.children[char];
+      }
+      const results = [];
+      (function dfs(curr, path) {
+        if (curr.isEnd) results.push(prefix + path);
+        for (const c in curr.children) dfs(curr.children[c], path + c);
+      })(node, '');
+      return results;
+    };
+  })();
+  (async () => {
+    const res = await fetch('workplace_words.txt');
+    const words = (await res.text()).split('\n').map(w => w.trim()).filter(w => w);
+    for (const w of words) trie.insert(w.toLowerCase());
+    dictLoaded = true;
+  })();
+
   // Show loading for suggestions if dictionary is not ready
   function showSuggestionsLoading() {
     suggestionsDiv.innerHTML = '<span style="color:#888">Loading dictionary...</span>';
@@ -61,9 +96,10 @@
       suggestionsDiv.parentNode.insertBefore(backspaceBtn, suggestionsDiv);
     }
     backspaceBtn.onclick = () => {
-      letterBuffer = letterBuffer.slice(0, -1);
-      updateSuggestionsUI();
-      broadcastSuggestions();
+      if (letterBuffer.length > 0) {
+        letterBuffer = letterBuffer.slice(0, -1);
+        updateSuggestionsAndBroadcast();
+      }
     };
   }
 
@@ -72,8 +108,7 @@
       // When a suggestion is clicked, add it to the sentence buffer and clear the letter buffer
       sentenceBuffer += (sentenceBuffer ? ' ' : '') + e.target.dataset.word;
       letterBuffer = '';
-      updateSuggestionsUI();
-      broadcastSuggestions();
+      updateSuggestionsAndBroadcast();
     }
   };
 
@@ -166,6 +201,25 @@
     updateSuggestionsUI(suggestions, userName, sentenceBuffer);
   }
 
+  function updateSuggestionsAndBroadcast() {
+    updateSuggestionsUI();
+    broadcastSuggestions();
+  }
+
+  // --- Broadcast sentenceBuffer to all participants when changed ---
+  function broadcastSentenceBuffer() {
+    for (const conn of dataConnections) {
+      if (conn.open) conn.send({type:'sentence', name:userName, sentence: sentenceBuffer});
+    }
+  }
+
+  // Patch updateSuggestionsAndBroadcast to also send the sentenceBuffer
+  const _updateSuggestionsAndBroadcast = updateSuggestionsAndBroadcast;
+  updateSuggestionsAndBroadcast = function() {
+    _updateSuggestionsAndBroadcast();
+    broadcastSentenceBuffer();
+  };
+
   createBtn.onclick = () => {
     if (!nameInput.value.trim()) return alert('Enter your name');
     userName = nameInput.value.trim();
@@ -185,8 +239,19 @@
     participants.clear();
     if (isCreator) participants.add(userName);
     updateParticipants();
-    localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    localVideo.srcObject = localStream;
+    try {
+      // Restore the original working code, but add a fallback error toast
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('Camera/microphone access is not supported in this browser. Please use a modern browser like Chrome or Firefox.');
+      }
+      localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+      localVideo.srcObject = localStream;
+    } catch (err) {
+      showToast(err.message || 'Camera/microphone access failed.');
+      landing.hidden = false;
+      meeting.hidden = true;
+      return;
+    }
     initPeer(roomId, isCreator);
     setupControls();
   }
@@ -203,18 +268,21 @@
       handleCall(call);
     });
     peer.on('connection', conn => {
-      dataConnections.push(conn);
-      conn.on('data', handleData);
+      addDataConnection(conn);
       conn.send({type:'name', name:userName, peerId:peer.id});
     });
+  }
+
+  function addDataConnection(conn) {
+    if (!dataConnections.includes(conn)) dataConnections.push(conn);
+    conn.on('data', handleData);
   }
 
   function callPeer(peerId) {
     const call = peer.call(peerId, localStream);
     handleCall(call);
     const conn = peer.connect(peerId);
-    dataConnections.push(conn);
-    conn.on('data', handleData);
+    addDataConnection(conn);
     conn.on('open', () => {
       conn.send({type:'name', name:userName, peerId:peer.id});
     });
@@ -246,6 +314,11 @@
     if (data.type === 'request_participants' && peer && peer.id === currentCall.peer) {
       broadcastParticipants();
     }
+    if (data.type === 'sentence') {
+      showRemoteSentence(data.name, data.sentence);
+      return;
+    }
+    handleData.call(this, data);
   }
 
   function handleCall(call) {
@@ -280,9 +353,18 @@
     }
   }
 
+  // --- Share Meeting URL with IP Only ---
+  function getShareableUrl(roomId) {
+    // Always use the LAN IP for sharing
+    let baseUrl = window.location.origin.replace(window.location.hostname, '192.168.0.100');
+    return `${baseUrl}?room=${encodeURIComponent(roomId)}`;
+  }
+
   shareBtn.onclick = () => {
-    navigator.clipboard.writeText(meetingIdSpan.textContent)
-      .then(() => showToast('Meeting ID copied'))
+    const meetingId = meetingIdSpan.textContent;
+    const url = getShareableUrl(meetingId);
+    navigator.clipboard.writeText(url)
+      .then(() => showToast('Meeting link copied'))
       .catch(err => console.error('Share error', err));
   };
 
@@ -304,13 +386,12 @@
   };
 
   handsToggle.onclick = () => {
+    if (handsToggle.disabled) return;
     handsOn = !handsOn;
     handsToggle.textContent = handsOn ? 'Hands On' : 'Hands Off';
-    overlay.hidden = !handsOn;
-    signTextDiv.hidden = !handsOn;
-    suggestionsDiv.hidden = !handsOn;
-    console.log('Hands button clicked, handsOn:', handsOn);
+    handsToggle.disabled = true;
     ensureHandTrackingActive();
+    setTimeout(() => { handsToggle.disabled = false; }, 1000);
   };
 
   function setupControls() {
@@ -323,131 +404,166 @@
     suggestionsDiv.hidden = true;
   }
 
-  function startSpeech() {
-    const S = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!S) return alert('SpeechRecognition not supported');
-    recognition = new S();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = 'en-US';
-    recognition.onresult = e => {
-      let t = '';
-      for (const r of e.results) t += r[0].transcript;
-      captionsDiv.textContent = t;
-      captionsDiv.hidden = false;
-      // Broadcast to peers
-      for (const conn of dataConnections) {
-        if (conn.open) conn.send({type:'caption', name:userName, text:t});
+  let hands = null;
+  function createHands() {
+    if (hands && hands.close) hands.close();
+    hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.3 });
+    hands.onResults(onHandsResults);
+  }
+  createHands();
+
+  function ensureHandTrackingActive() {
+    if (handsOn) {
+      // Always show overlays and request video frame if handsOn
+      showHandTrackingLoading(false);
+      overlay.hidden = false;
+      signTextDiv.hidden = false;
+      suggestionsDiv.hidden = false;
+      // Defensive: ensure localVideo is ready before requesting frame
+      if (localVideo.readyState >= 2) {
+        requestVideoFrame();
+      } else {
+        localVideo.onloadeddata = () => {
+          requestVideoFrame();
+        };
       }
-    };
-    recognition.onerror = err => console.error(err);
-    recognition.start();
-  }
-  function stopSpeech() { if (recognition) recognition.stop(); captionsDiv.hidden = true; }
-
-  function showRemoteCaption(name, text) {
-    captionsDiv.hidden = false;
-    captionsDiv.innerHTML = `<b>${name}:</b> ${text}`;
-  }
-
-  chatSend.onclick = sendChatMessage;
-  chatInput.addEventListener('keydown', e => { if (e.key === 'Enter') sendChatMessage(); });
-
-  function sendChatMessage() {
-    const msg = chatInput.value.trim();
-    if (!msg) return;
-    appendChatMessage(userName, msg, true);
-    for (const conn of dataConnections) {
-      if (conn.open) conn.send({type:'chat', name:userName, text:msg});
+    } else {
+      showHandTrackingLoading(false);
+      overlay.hidden = true;
+      signTextDiv.hidden = true;
+      suggestionsDiv.hidden = true;
     }
-    chatInput.value = '';
-  }
-
-  function appendChatMessage(sender, text, local) {
-    const div = document.createElement('div');
-    div.innerHTML = `<b>${sender}:</b> ${text}`;
-    div.style.textAlign = local ? 'right' : 'left';
-    chatMessages.appendChild(div);
-    chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
   function requestVideoFrame() {
     if (!handsOn) return;
-    setTimeout(() => {
+    if (!hands || !localVideo || localVideo.readyState < 2) {
+      setTimeout(requestVideoFrame, 100);
+      return;
+    }
+    localVideo.requestVideoFrameCallback(async () => {
+      if (!handsOn) return;
       try {
-        localVideo.requestVideoFrameCallback(async () => {
-          if (!handsOn) return;
-          await hands.send({ image: localVideo });
-          requestVideoFrame();
-        });
+        await hands.send({ image: localVideo });
       } catch (e) {
-        // Retry after short delay if error
-        setTimeout(requestVideoFrame, 100);
+        if (e && e.message && e.message.includes('HEAP8')) {
+          showToast('Hand tracking crashed, restarting...');
+          createHands();
+          setTimeout(requestVideoFrame, 300);
+          return;
+        } else {
+          showToast('Hand tracking error: ' + (e.message || e));
+        }
       }
-    }, 50);
+      setTimeout(requestVideoFrame, 60); // Throttle to ~16 FPS
+    });
   }
 
-  function ensureHandTrackingActive() {
-    if (handsOn && localVideo.readyState >= 2) {
-      requestVideoFrame();
-    } else if (handsOn) {
-      localVideo.onloadeddata = () => requestVideoFrame();
+  function showHandTrackingLoading(show) {
+    let loading = document.getElementById('hands-loading');
+    if (!loading) {
+      loading = document.createElement('div');
+      loading.id = 'hands-loading';
+      loading.style = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#fff;padding:1.2em 2em;border-radius:8px;box-shadow:0 2px 8px #0002;z-index:300;font-size:1.1em;color:#1976d2;';
+      loading.innerText = 'Initializing hand tracking...';
+      document.body.appendChild(loading);
     }
+    loading.hidden = !show;
   }
+
+  function onHandsResults(results) {
+    try {
+      overlayCtx.save();
+      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
+      if (results && results.image && overlay.width && overlay.height)
+        overlayCtx.drawImage(results.image, 0, 0, overlay.width, overlay.height);
+      // --- HAND TRACKING ACTIVATION PATCH ---
+      if (handsOn && results.multiHandLandmarks && results.multiHandLandmarks[0]) {
+        const landmarks = results.multiHandLandmarks[0];
+        let finger = {
+          thumb: { angle_sum: 0 },
+          index: { angle_sum: 0 },
+          middle: { angle_sum: 0 },
+          ring: { angle_sum: 0 },
+          pinky: { angle_sum: 0 }
+        };
+        const L = landmarks;
+        for (let i = 0; i < L.length; i++) {
+          L[i].x -= L[0].x;
+          L[i].y -= L[0].y;
+          L[i].z -= L[0].z;
+        }
+        finger.thumb.angle_sum = angle(L[1], L[2], L[3]) + angle(L[2], L[3], L[4]);
+        finger.index.angle_sum = angle(L[5], L[6], L[7]) + angle(L[6], L[7], L[8]);
+        finger.middle.angle_sum = angle(L[9], L[10], L[11]) + angle(L[10], L[11], L[12]);
+        finger.ring.angle_sum = angle(L[13], L[14], L[15]) + angle(L[14], L[15], L[16]);
+        finger.pinky.angle_sum = angle(L[17], L[18], L[19]) + angle(L[18], L[19], L[20]);
+        let index_middle_tip_dist = distance3d(
+          L[8].x, L[8].y, L[8].z,
+          L[12].x, L[12].y, L[12].z
+        );
+        let predicted_letter = letter(
+          finger.thumb.angle_sum,
+          finger.index.angle_sum,
+          finger.middle.angle_sum,
+          finger.ring.angle_sum,
+          finger.pinky.angle_sum,
+          index_middle_tip_dist
+        );
+        signTextDiv.textContent = predicted_letter;
+        signTextDiv.hidden = false;
+        // --- Only update buffer if new letter is shown ---
+        if (dictLoaded && /^[A-Za-z]$/.test(predicted_letter)) {
+          if (predicted_letter !== lastDetectedLetter) {
+            // Replace last letter in buffer with new letter
+            if (letterBuffer.length === 0) {
+              letterBuffer = predicted_letter.toLowerCase();
+            } else {
+              letterBuffer = letterBuffer.slice(0, -1) + predicted_letter.toLowerCase();
+            }
+            lastDetectedLetter = predicted_letter;
+            updateSuggestionsAndBroadcast();
+            if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
+            lastLetterTimeout = setTimeout(() => { lastDetectedLetter = ''; }, 1000);
+          } else {
+            // Keep buffer at current state (do not add more letters)
+            updateSuggestionsUI();
+          }
+        } else if (!/^[A-Za-z]$/.test(predicted_letter)) {
+          lastDetectedLetter = '';
+          if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
+          lastLetterTimeout = setTimeout(() => {
+            letterBuffer = '';
+            updateSuggestionsAndBroadcast();
+            suggestionsDiv.hidden = true;
+          }, 1000);
+        }
+        // If you have a valid prediction, show overlays
+        console.log('Hand detected, overlays shown');
+        signTextDiv.hidden = false;
+        suggestionsDiv.hidden = false;
+        overlay.hidden = false;
+      } else {
+        console.log('No hand detected, overlays hidden');
+        signTextDiv.hidden = true;
+        overlay.hidden = true;
+        suggestionsDiv.hidden = true;
+        if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
+        lastLetterTimeout = setTimeout(() => {
+          letterBuffer = '';
+          updateSuggestionsAndBroadcast();
+          suggestionsDiv.hidden = true;
+        }, 1000);
+      }
+      overlayCtx.restore();
+    } catch (e) {
+      showToast('Hand tracking failed: ' + (e.message || e));
+      console.error(e);
+    }
+  };
 
   // Sign detection via MediaPipe
-  const hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
-  hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.3 });
-  hands.onResults(onHandsResults);
-
-  let buffer = '';
-  let dictLoaded = false;
-  const trie = new (function() {
-    this.root = { children: {}, isEnd: false };
-    this.insert = function(word) {
-      let node = this.root;
-      for (const char of word) {
-        if (!node.children[char]) node.children[char] = { children: {}, isEnd: false };
-        node = node.children[char];
-      }
-      node.isEnd = true;
-    };
-    this.getWordsWithPrefix = function(prefix) {
-      let node = this.root;
-      for (const char of prefix) {
-        if (!node.children[char]) return [];
-        node = node.children[char];
-      }
-      const results = [];
-      (function dfs(curr, path) {
-        if (curr.isEnd) results.push(prefix + path);
-        for (const c in curr.children) dfs(curr.children[c], path + c);
-      })(node, '');
-      return results;
-    };
-  })();
-  // --- Load workplace-specific dictionary ---
-  (async () => {
-    const res = await fetch('workplace_words.txt');
-    const words = (await res.text()).split('\n').map(w => w.trim()).filter(w => w);
-    for (const w of words) trie.insert(w.toLowerCase());
-    dictLoaded = true;
-  })();
-
-  function distance3d(x1, y1, z1, x2, y2, z2) {
-    return Math.sqrt(
-      Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2) + Math.pow(z2 - z1, 2)
-    );
-  }
-  function angle(l1, l2, l3) {
-    const v1 = [l2.x - l1.x, l2.y - l1.y, l2.z - l1.z];
-    const v2 = [l3.x - l2.x, l3.y - l2.y, l3.z - l2.z];
-    const dotproduct = v1.reduce((a, b, i) => a + b * v2[i], 0);
-    const v1_mag = Math.hypot(v1[0], v1[1], v1[2]);
-    const v2_mag = Math.hypot(v2[0], v2[1], v2[2]);
-    const rad = Math.acos(dotproduct / (v1_mag * v2_mag));
-    return (rad * 180) / Math.PI;
-  }
   function letter(thumb, index, middle, ring, pinky, tip_dist) {
     if (index > 50 && middle > 50 && ring > 50 && pinky > 50) {
       if (middle <= 170 && ring <= 170) {
@@ -518,130 +634,22 @@
     return "NA";
   }
 
-  // --- Improved onHandsResults: buffer holds only current letter until new is shown ---
-  function onHandsResults(results) {
-    try {
-      overlayCtx.save();
-      overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
-      if (results && results.image && overlay.width && overlay.height)
-        overlayCtx.drawImage(results.image, 0, 0, overlay.width, overlay.height);
-      if (handsOn && results.multiHandLandmarks && results.multiHandLandmarks[0]) {
-        const landmarks = results.multiHandLandmarks[0];
-        let finger = {
-          thumb: { angle_sum: 0 },
-          index: { angle_sum: 0 },
-          middle: { angle_sum: 0 },
-          ring: { angle_sum: 0 },
-          pinky: { angle_sum: 0 }
-        };
-        const L = landmarks;
-        for (let i = 0; i < L.length; i++) {
-          L[i].x -= L[0].x;
-          L[i].y -= L[0].y;
-          L[i].z -= L[0].z;
-        }
-        finger.thumb.angle_sum = angle(L[1], L[2], L[3]) + angle(L[2], L[3], L[4]);
-        finger.index.angle_sum = angle(L[5], L[6], L[7]) + angle(L[6], L[7], L[8]);
-        finger.middle.angle_sum = angle(L[9], L[10], L[11]) + angle(L[10], L[11], L[12]);
-        finger.ring.angle_sum = angle(L[13], L[14], L[15]) + angle(L[14], L[15], L[16]);
-        finger.pinky.angle_sum = angle(L[17], L[18], L[19]) + angle(L[18], L[19], L[20]);
-        let index_middle_tip_dist = distance3d(
-          L[8].x, L[8].y, L[8].z,
-          L[12].x, L[12].y, L[12].z
-        );
-        let predicted_letter = letter(
-          finger.thumb.angle_sum,
-          finger.index.angle_sum,
-          finger.middle.angle_sum,
-          finger.ring.angle_sum,
-          finger.pinky.angle_sum,
-          index_middle_tip_dist
-        );
-        signTextDiv.textContent = predicted_letter;
-        signTextDiv.hidden = false;
-        // --- Only update buffer if new letter is shown ---
-        if (dictLoaded && /^[A-Za-z]$/.test(predicted_letter)) {
-          if (predicted_letter !== lastDetectedLetter) {
-            // Replace last letter in buffer with new letter
-            if (letterBuffer.length === 0) {
-              letterBuffer = predicted_letter.toLowerCase();
-            } else {
-              letterBuffer = letterBuffer.slice(0, -1) + predicted_letter.toLowerCase();
-            }
-            lastDetectedLetter = predicted_letter;
-            updateSuggestionsUI();
-            broadcastSuggestions();
-            if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
-            lastLetterTimeout = setTimeout(() => { lastDetectedLetter = ''; }, 1000);
-          } else {
-            // Keep buffer at current state (do not add more letters)
-            updateSuggestionsUI();
-          }
-        } else if (!/^[A-Za-z]$/.test(predicted_letter)) {
-          lastDetectedLetter = '';
-          if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
-          lastLetterTimeout = setTimeout(() => {
-            letterBuffer = '';
-            updateSuggestionsUI();
-            broadcastSuggestions();
-            suggestionsDiv.hidden = true;
-          }, 1000);
-        }
-      } else {
-        signTextDiv.hidden = true;
-        if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
-        lastLetterTimeout = setTimeout(() => {
-          letterBuffer = '';
-          updateSuggestionsUI();
-          broadcastSuggestions();
-          suggestionsDiv.hidden = true;
-        }, 1000);
-      }
-      overlayCtx.restore();
-    } catch (e) {
-      // Ignore handtracking errors
-    }
-  };
-
-  // Patch startMeeting to ensure hand tracking is started if handsOn
-  const _startMeeting2 = startMeeting;
-  startMeeting = async function(roomId, isCreator) {
-    await _startMeeting2(roomId, isCreator);
-    ensureHandTrackingActive();
-  };
-
-  // --- Robust camera failure handling ---
-  async function ensureCameraWorks() {
-    try {
-      if (!localStream || localStream.getVideoTracks().every(t => t.readyState !== 'live')) {
-        localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-        localVideo.srcObject = localStream;
-        showToast('Camera reconnected');
-      }
-    } catch (e) {
-      showToast('Camera error: ' + (e.message || e));
-      overlay.hidden = true;
-      signTextDiv.hidden = true;
-      suggestionsDiv.hidden = true;
-    }
+  function distance3d(x1, y1, z1, x2, y2, z2) {
+    return Math.sqrt(
+      Math.pow(x2 - x1, 2) + Math.pow(y2 - y1, 2) + Math.pow(z2 - z1, 2)
+    );
   }
-  localVideo.onended = ensureCameraWorks;
-  if (localStream) {
-    localStream.getVideoTracks().forEach(track => {
-      track.onended = ensureCameraWorks;
-      track.oninactive = ensureCameraWorks;
-    });
+  function angle(l1, l2, l3) {
+    const v1 = [l2.x - l1.x, l2.y - l1.y, l2.z - l1.z];
+    const v2 = [l3.x - l2.x, l3.y - l2.y, l3.z - l2.z];
+    const dotproduct = v1.reduce((a, b, i) => a + b * v2[i], 0);
+    const v1_mag = Math.hypot(v1[0], v1[1], v1[2]);
+    const v2_mag = Math.hypot(v2[0], v2[1], v2[2]);
+    const rad = Math.acos(dotproduct / (v1_mag * v2_mag));
+    return (rad * 180) / Math.PI;
   }
 
-  // Patch startMeeting to always check camera
-  const _startMeeting3 = startMeeting;
-  startMeeting = async function(roomId, isCreator) {
-    await _startMeeting3(roomId, isCreator);
-    await ensureCameraWorks();
-    ensureHandTrackingActive();
-  };
-
-  // --- Fix updateVideoLabels to use user names ---
+  // --- Video label updater for local/remote video elements ---
   function updateVideoLabels() {
     let localLabel = document.getElementById('local-video-label');
     if (!localLabel) {
@@ -659,7 +667,6 @@
       remoteVideo.parentNode.appendChild(remoteLabel);
     }
     // Find the remote participant's peerId and map to name
-    let remotePeerId = null;
     if (currentCall && currentCall.peer && peerIdToName[currentCall.peer]) {
       remoteLabel.textContent = peerIdToName[currentCall.peer];
     } else {
@@ -761,8 +768,7 @@
       if (lastSuggestions[suggestionIndex]) {
         sentenceBuffer += (sentenceBuffer ? ' ' : '') + lastSuggestions[suggestionIndex];
         letterBuffer = '';
-        updateSuggestionsUI();
-        broadcastSuggestions();
+        updateSuggestionsAndBroadcast();
         suggestionIndex = 0;
         lastSuggestions = [];
       }
@@ -821,6 +827,23 @@
     _updateParticipants();
     broadcastParticipants();
   };
+
+  // Display remote participant's hand sentence output
+  function showRemoteSentence(name, sentence) {
+    let sentenceDiv = document.getElementById('remote-sentence');
+    if (!sentenceDiv) {
+      sentenceDiv = document.createElement('div');
+      sentenceDiv.id = 'remote-sentence';
+      sentenceDiv.className = 'captions';
+      document.body.appendChild(sentenceDiv);
+    }
+    sentenceDiv.innerHTML = `<b>${name} (Hands):</b> ${sentence}`;
+    sentenceDiv.hidden = !sentence;
+    if (sentence) {
+      sentenceDiv.hidden = false;
+      setTimeout(() => { sentenceDiv.hidden = true; }, 5000);
+    }
+  }
 
 })();
 

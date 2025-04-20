@@ -1,0 +1,12 @@
+[build]
+  publish = "."
+  command = ""
+
+[dev]
+  command = "python3 serve_https.py 8000"
+  port = 8000
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
