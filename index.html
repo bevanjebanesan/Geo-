@@ -82,7 +82,7 @@
       const ipUrl = `http://${ip}:${port}${room ? `/?room=${encodeURIComponent(room)}` : ''}`;
       const container = document.getElementById('ip-link-container');
       if (container) {
-        container.innerHTML = `<b>LAN Meeting Link:</b> <a href='${ipUrl}' target='_blank'>${ipUrl}</a>`;
+        container.innerHTML = `<b>LAN Meeting Link:</b> <a href='${ipUrl}' target='_blank'>${ipUrl}</a><br><span style='color:#888;font-size:0.95em'>(Open this link on your phone or other devices on the same WiFi)</span>`;
       }
     })();
   </script>
