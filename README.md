@@ -29,7 +29,7 @@ A secure, peer-to-peer meeting and hand tracking web app. Features:
    ```bash
    python3 serve_https.py 8000
    ```
-   Open `https://192.168.0.100:8000/` in your browser (accept the SSL warning if using self-signed certs).
+   Open `https://192.168.186.144:8000/` in your browser (accept the SSL warning if using self-signed certs).
 
 3. **Join or create a meeting:**
    - Enter your name and meeting ID, then share the LAN link for others to join.
@@ -72,7 +72,7 @@ MIT
 
 ## Local Development
 - Start server: `python3 serve_https.py 8000`
-- Access via: `https://192.168.0.100:8000/`
+- Access via: `https://192.168.186.144:8000/`
 
 ## Deployment
 - Deploys via Netlify (see `netlify.toml`)

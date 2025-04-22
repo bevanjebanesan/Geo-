@@ -19,7 +19,7 @@ context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
 context.load_cert_chain(certfile=CERT_FILE, keyfile=KEY_FILE)
 httpd.socket = context.wrap_socket(httpd.socket, server_side=True)
 
-print(f'Serving HTTPS on https://192.168.0.100:{PORT}/')
+print(f'Serving HTTPS on https://192.168.186.144:{PORT}/')
 try:
     httpd.serve_forever()
 except KeyboardInterrupt:

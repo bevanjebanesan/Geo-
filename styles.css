@@ -217,6 +217,22 @@ body {
   background: #125ea9;
 }
 
+/* Leave button styles */
+#leave-button {
+  background: #e53935 !important;
+  color: #fff !important;
+  border: none;
+  border-radius: 4px;
+  padding: 0.3rem 1.1rem;
+  font-size: 1rem;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+#leave-button:hover {
+  background: #b71c1c !important;
+}
+
 /* Responsive adjustments */
 @media (max-width: 900px) {
   .videos {

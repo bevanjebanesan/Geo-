@@ -8,9 +8,28 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="icon" href="favicon.ico">
   <script defer src="https://unpkg.com/peerjs@1.4.7/dist/peerjs.min.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+  <script>
+    // --- Safari/MediaPipe Hands WASM bug workaround ---
+    (function() {
+      var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+      if (isSafari) {
+        window.Module = window.Module || {};
+        window.Module.locateFile = function(file) {
+          // Always force the non-SIMD WASM for both possible names
+          if (
+            file.endsWith('hands_solution_simd_wasm_bin.js') ||
+            file.endsWith('hands_solution_wasm_bin.js')
+          ) {
+            return 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_wasm_bin.js';
+          }
+          return 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/' + file;
+        };
+      }
+    })();
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
   <script defer src="script.js"></script>
 </head>
 <body>
@@ -72,7 +91,7 @@
     // --- Display LAN IP link for easy access ---
     (async function() {
       // Try to fetch the LAN IP from a special endpoint or fallback to placeholder
-      let ip = '192.168.0.100'; // fallback
+      let ip = '192.168.186.144'; // fallback
       try {
         // Try to get the IP from the server (if you add a /ip endpoint), else fallback
         // You can also update this script to fetch the IP dynamically if you have a backend

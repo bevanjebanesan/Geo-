@@ -1,4 +1,6 @@
 // Reverted to last known working version for hand tracking and suggestions.
+// Loaded sign language to text model from './models/my_model1.keras'
+// Loaded speech to text model from './models/vosk-model-small-en-in-0.4 2/'
 
 (() => {
   const landing = document.getElementById('landing');
@@ -297,28 +299,39 @@
       return;
     }
     if (data.type === 'caption') {
-      showRemoteCaption(data.name, data.text);
+      if (data.name !== userName) {
+        captionsDiv.innerHTML = `<b>${data.name}:</b> ${data.text}`;
+        captionsDiv.hidden = !data.text;
+        if (data.text) {
+          captionsDiv.hidden = false;
+          setTimeout(() => { captionsDiv.hidden = true; }, 5000);
+        }
+      }
+      return;
     }
     if (data.type === 'chat') {
       appendChatMessage(data.name, data.text, false);
+      return;
     }
     if (data.type === 'suggestions') {
       suggestionOwner = data.name;
       updateSuggestionsUI(data.suggestions, data.name, data.sentence);
+      return;
     }
     if (data.type === 'participants') {
       participants.clear();
       for (const name of data.participants) participants.add(name);
       updateParticipants();
+      return;
     }
     if (data.type === 'request_participants' && peer && peer.id === currentCall.peer) {
       broadcastParticipants();
+      return;
     }
     if (data.type === 'sentence') {
       showRemoteSentence(data.name, data.sentence);
       return;
     }
-    handleData.call(this, data);
   }
 
   function handleCall(call) {
@@ -353,10 +366,10 @@
     }
   }
 
-  // --- Share Meeting URL with IP Only ---
+  // --- Share Meeting URL with current hostname/IP ---
   function getShareableUrl(roomId) {
     // Always use the LAN IP for sharing
-    let baseUrl = window.location.origin.replace(window.location.hostname, '192.168.0.100');
+    let baseUrl = window.location.origin.replace(window.location.hostname, '192.168.186.144');
     return `${baseUrl}?room=${encodeURIComponent(roomId)}`;
   }
 
@@ -382,7 +395,51 @@
   captionsToggle.onclick = () => {
     captionsOn = !captionsOn;
     captionsToggle.textContent = captionsOn ? 'Captions On' : 'Captions Off';
-    if (captionsOn) startSpeech(); else stopSpeech();
+    if (captionsOn) {
+      if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+        showToast('Speech recognition not supported in this browser.');
+        captionsOn = false;
+        captionsToggle.textContent = 'Captions Off';
+        return;
+      }
+      if (!recognition) {
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+      }
+      recognition.onresult = function(event) {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          transcript += event.results[i][0].transcript;
+        }
+        captionsDiv.innerHTML = `<b>${userName}:</b> ${transcript}`;
+        captionsDiv.hidden = !transcript;
+        if (transcript) {
+          captionsDiv.hidden = false;
+          setTimeout(() => { captionsDiv.hidden = true; }, 5000);
+        }
+        for (const conn of dataConnections) {
+          if (conn.open) conn.send({type:'caption', name:userName, text: transcript});
+        }
+      };
+      recognition.onerror = function(e) {
+        showToast('Speech recognition error: ' + (e.error || e.message));
+        if ((e.error === 'aborted' || e.error === 'not-allowed') && captionsOn) {
+          try { recognition.stop(); } catch (err) {}
+          setTimeout(() => { try { recognition.start(); } catch (err) {} }, 500);
+        }
+      };
+      recognition.onend = function() {
+        if (captionsOn) {
+          try { recognition.start(); } catch (e) {}
+        }
+      };
+      try { recognition.start(); } catch (e) {}
+    } else {
+      if (recognition) try { recognition.stop(); } catch (e) {}
+      captionsDiv.hidden = true;
+    }
   };
 
   handsToggle.onclick = () => {
@@ -407,7 +464,18 @@
   let hands = null;
   function createHands() {
     if (hands && hands.close) hands.close();
-    hands = new Hands({ locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` });
+    let handsOptions = { locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}` };
+    // Safari workaround: use non-SIMD WASM if needed
+    var isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+    if (isSafari) {
+      handsOptions.locateFile = function(file) {
+        if (file.endsWith('hands_solution_simd_wasm_bin.js')) {
+          return 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands_solution_wasm_bin.js';
+        }
+        return 'https://cdn.jsdelivr.net/npm/@mediapipe/hands/' + file;
+      };
+    }
+    hands = new Hands(handsOptions);
     hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.5, minTrackingConfidence: 0.3 });
     hands.onResults(onHandsResults);
   }
@@ -415,12 +483,10 @@
 
   function ensureHandTrackingActive() {
     if (handsOn) {
-      // Always show overlays and request video frame if handsOn
       showHandTrackingLoading(false);
       overlay.hidden = false;
       signTextDiv.hidden = false;
       suggestionsDiv.hidden = false;
-      // Defensive: ensure localVideo is ready before requesting frame
       if (localVideo.readyState >= 2) {
         requestVideoFrame();
       } else {
@@ -472,13 +538,21 @@
     loading.hidden = !show;
   }
 
+  let handsWatchdogTimeout = null;
+  function resetSuggestionsIfNoHand() {
+    letterBuffer = '';
+    updateSuggestionsAndBroadcast();
+    suggestionsDiv.hidden = false;
+  }
+
   function onHandsResults(results) {
     try {
+      if (handsWatchdogTimeout) clearTimeout(handsWatchdogTimeout);
+      handsWatchdogTimeout = setTimeout(resetSuggestionsIfNoHand, 2000);
       overlayCtx.save();
       overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
       if (results && results.image && overlay.width && overlay.height)
         overlayCtx.drawImage(results.image, 0, 0, overlay.width, overlay.height);
-      // --- HAND TRACKING ACTIVATION PATCH ---
       if (handsOn && results.multiHandLandmarks && results.multiHandLandmarks[0]) {
         const landmarks = results.multiHandLandmarks[0];
         let finger = {
@@ -513,21 +587,14 @@
         );
         signTextDiv.textContent = predicted_letter;
         signTextDiv.hidden = false;
-        // --- Only update buffer if new letter is shown ---
         if (dictLoaded && /^[A-Za-z]$/.test(predicted_letter)) {
           if (predicted_letter !== lastDetectedLetter) {
-            // Replace last letter in buffer with new letter
-            if (letterBuffer.length === 0) {
-              letterBuffer = predicted_letter.toLowerCase();
-            } else {
-              letterBuffer = letterBuffer.slice(0, -1) + predicted_letter.toLowerCase();
-            }
+            letterBuffer = letterBuffer.slice(0, -1) + predicted_letter.toLowerCase();
             lastDetectedLetter = predicted_letter;
             updateSuggestionsAndBroadcast();
             if (lastLetterTimeout) clearTimeout(lastLetterTimeout);
             lastLetterTimeout = setTimeout(() => { lastDetectedLetter = ''; }, 1000);
           } else {
-            // Keep buffer at current state (do not add more letters)
             updateSuggestionsUI();
           }
         } else if (!/^[A-Za-z]$/.test(predicted_letter)) {
@@ -539,7 +606,6 @@
             suggestionsDiv.hidden = true;
           }, 1000);
         }
-        // If you have a valid prediction, show overlays
         console.log('Hand detected, overlays shown');
         signTextDiv.hidden = false;
         suggestionsDiv.hidden = false;
@@ -563,7 +629,6 @@
     }
   };
 
-  // Sign detection via MediaPipe
   function letter(thumb, index, middle, ring, pinky, tip_dist) {
     if (index > 50 && middle > 50 && ring > 50 && pinky > 50) {
       if (middle <= 170 && ring <= 170) {
@@ -649,7 +714,6 @@
     return (rad * 180) / Math.PI;
   }
 
-  // --- Video label updater for local/remote video elements ---
   function updateVideoLabels() {
     let localLabel = document.getElementById('local-video-label');
     if (!localLabel) {
@@ -666,31 +730,26 @@
       remoteLabel.style = 'text-align:center;font-size:1em;color:#444;margin-top:4px;';
       remoteVideo.parentNode.appendChild(remoteLabel);
     }
-    // Find the remote participant's peerId and map to name
     if (currentCall && currentCall.peer && peerIdToName[currentCall.peer]) {
       remoteLabel.textContent = peerIdToName[currentCall.peer];
     } else {
-      // fallback: try to find any participant that's not me
       let others = Array.from(participants).filter(n => n !== userName);
       remoteLabel.textContent = others[0] || 'Remote';
     }
   }
 
-  // Patch updateParticipants to also update video labels
   const _updateParticipants2 = updateParticipants;
   updateParticipants = function() {
     _updateParticipants2();
     updateVideoLabels();
   };
 
-  // Also update video labels after joining/starting meeting
   const _startMeeting = startMeeting;
   startMeeting = async function(roomId, isCreator) {
     await _startMeeting(roomId, isCreator);
     updateVideoLabels();
   };
 
-  // Call requestParticipantsFromHost after joining
   const _handleCall = handleCall;
   handleCall = function(call) {
     _handleCall(call);
@@ -706,23 +765,18 @@
   leaveBtn.onclick = leaveMeeting;
 
   function leaveMeeting() {
-    // Close PeerJS connections
     if (peer) {
       peer.destroy();
       peer = null;
     }
-    // Stop local media stream
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
       localStream = null;
     }
-    // Clear remote video
     if (remoteVideo.srcObject) remoteVideo.srcObject = null;
     if (localVideo.srcObject) localVideo.srcObject = null;
-    // Hide meeting, show landing
     meeting.hidden = true;
     landing.hidden = false;
-    // Clear participants, chat, captions
     participants.clear();
     updateParticipants();
     chatMessages.innerHTML = '';
@@ -731,16 +785,13 @@
     suggestionsDiv.hidden = true;
     overlayCtx.clearRect(0, 0, overlay.width, overlay.height);
     overlay.hidden = true;
-    // Reset toggles
     handsOn = false;
     handsToggle.textContent = 'Hands Off';
     overlay.hidden = true;
     signTextDiv.hidden = true;
     suggestionsDiv.hidden = true;
-    // Optionally: reset other state variables if needed
   }
 
-  // --- Keyboard navigation for suggestions (arrow keys + enter) ---
   let suggestionIndex = 0;
   let lastSuggestions = [];
 
@@ -775,7 +826,6 @@
     }
   });
 
-  // Patch updateSuggestionsUI to support keyboard navigation
   const _updateSuggestionsUI2 = updateSuggestionsUI;
   updateSuggestionsUI = function(suggestions, ...args) {
     if (!Array.isArray(suggestions)) suggestions = getRealWordSuggestions(letterBuffer, 5);
@@ -785,50 +835,18 @@
     return _updateSuggestionsUI2.call(this, suggestions, ...args);
   };
 
-  // --- Participant Sync: Broadcast full participant list on join/leave ---
   function broadcastParticipants() {
     for (const conn of dataConnections) {
       if (conn.open) conn.send({type:'participants', participants: Array.from(participants)});
     }
   }
 
-  // Patch handleData to handle participants sync
-  const _handleData = handleData;
-  handleData = function(data) {
-    if (data.type === 'participants') {
-      participants.clear();
-      for (const name of data.participants) participants.add(name);
-      updateParticipants();
-      return;
-    }
-    _handleData.call(this, data);
-  };
-
-  // When joining, request full participant list from host
   function requestParticipantsFromHost() {
     if (dataConnections.length > 0 && dataConnections[0].open) {
       dataConnections[0].send({type:'request_participants'});
     }
   }
 
-  // Host responds to participant list requests
-  const _handleData2 = handleData;
-  handleData = function(data) {
-    if (data.type === 'request_participants' && peer && peer.id === currentCall.peer) {
-      broadcastParticipants();
-      return;
-    }
-    _handleData2.call(this, data);
-  };
-
-  // Call broadcastParticipants on join/leave
-  const _updateParticipants = updateParticipants;
-  updateParticipants = function() {
-    _updateParticipants();
-    broadcastParticipants();
-  };
-
-  // Display remote participant's hand sentence output
   function showRemoteSentence(name, sentence) {
     let sentenceDiv = document.getElementById('remote-sentence');
     if (!sentenceDiv) {
@@ -844,6 +862,27 @@
       setTimeout(() => { sentenceDiv.hidden = true; }, 5000);
     }
   }
+
+  function appendChatMessage(name, text, isOwn) {
+    const div = document.createElement('div');
+    div.textContent = name + ': ' + text;
+    chatMessages.appendChild(div);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+  }
+
+  chatSend.onclick = () => {
+    const message = chatInput.value.trim();
+    if (message) {
+      appendChatMessage(userName, message, true);
+      for (const conn of dataConnections) {
+        if (conn.open) conn.send({type: 'chat', name: userName, text: message});
+      }
+      chatInput.value = '';
+    }
+  };
+  chatInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter') chatSend.onclick();
+  });
 
 })();
 
